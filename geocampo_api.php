@@ -83,17 +83,349 @@ function obtener_filtros_desde_array(array $origen): array
         'distrito' => limpiar_texto($origen['distrito'] ?? ''),
         'segmento' => limpiar_texto($origen['segmento'] ?? ''),
         'estado' => limpiar_texto($origen['estado'] ?? ''),
+        'pago' => limpiar_texto($origen['pago'] ?? ''),
         'busqueda' => limpiar_texto($origen['busqueda'] ?? ''),
     ];
 }
 
-function construir_where_cuentas(array $filtros, string &$types, array &$params): string
+
+function tabla_fisica_existe(mysqli $mysqli, string $tabla): bool
+{
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $tabla)) {
+        return false;
+    }
+
+    $stmt = $mysqli->prepare("
+        SELECT COUNT(*) AS total
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+    ");
+    if (!$stmt) {
+        return false;
+    }
+
+    $stmt->bind_param('s', $tabla);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    return (int)($row['total'] ?? 0) > 0;
+}
+
+
+function columna_fisica_existe(mysqli $mysqli, string $tabla, string $columna): bool
+{
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $tabla) || !preg_match('/^[A-Za-z0-9_]+$/', $columna)) {
+        return false;
+    }
+
+    $stmt = $mysqli->prepare("
+        SELECT COUNT(*) AS total
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND COLUMN_NAME = ?
+    ");
+    if (!$stmt) {
+        return false;
+    }
+
+    $stmt->bind_param('ss', $tabla, $columna);
+    $stmt->execute();
+    $row = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    return (int)($row['total'] ?? 0) > 0;
+}
+
+function columna_cuenta_expr(mysqli $mysqli, array $ctx, array $candidatos, string $defaultSql = 'NULL'): string
+{
+    $tabla = limpiar_texto($ctx['tabla'] ?? '');
+    if ($tabla === '' || !preg_match('/^[A-Za-z0-9_]+$/', $tabla)) {
+        return $defaultSql;
+    }
+
+    foreach ($candidatos as $columna) {
+        if (columna_fisica_existe($mysqli, $tabla, $columna)) {
+            return "c.`{$columna}`";
+        }
+    }
+
+    return $defaultSql;
+}
+
+function columna_cartera_cuenta_expr(mysqli $mysqli, array $ctx): string
+{
+    $idCartera = (int)($ctx['id_cartera'] ?? 0);
+    return columna_cuenta_expr($mysqli, $ctx, ['ID_CARTERA', 'IDCARTERA', 'id_cartera', 'idcartera'], (string)$idCartera);
+}
+
+function fecha_cuenta_expr(mysqli $mysqli, array $ctx): string
+{
+    $tabla = limpiar_texto($ctx['tabla'] ?? '');
+    if ($tabla === '' || !preg_match('/^[A-Za-z0-9_]+$/', $tabla)) {
+        return 'DATE(NOW())';
+    }
+
+    $candidatos = ['FECHA_ACTUALIZACION', 'FECHA_ACTUALIZADO', 'FECHAASIGNACION', 'FECHA_ASIGNACION', 'FECHAVEN', 'FECHA_VENCIMIENTO', 'FECHAULTPA', 'FECHAULTI'];
+    $columnas = [];
+
+    foreach ($candidatos as $columna) {
+        if (columna_fisica_existe($mysqli, $tabla, $columna)) {
+            $columnas[] = "c.`{$columna}`";
+        }
+    }
+
+    if (!$columnas) {
+        return 'DATE(NOW())';
+    }
+
+    return 'DATE(COALESCE(' . implode(', ', $columnas) . ', NOW()))';
+}
+
+function resolver_nombre_tabla_log(mysqli $mysqli, array $row): string
+{
+    $candidatos = [
+        'tabla',
+        'TABLA',
+        'nomtable',
+        'NOMTABLE',
+        'nombre_tabla',
+        'NOMBRE_TABLA',
+        'tabla_fisica',
+        'TABLA_FISICA',
+        'table_name',
+        'TABLE_NAME',
+        'nom_tabla',
+        'NOM_TABLA'
+    ];
+
+    foreach ($candidatos as $campo) {
+        $valor = limpiar_texto($row[$campo] ?? '');
+        if ($valor !== '' && preg_match('/^[A-Za-z0-9_]+$/', $valor) && tabla_fisica_existe($mysqli, $valor)) {
+            return $valor;
+        }
+    }
+
+    foreach ($row as $valor) {
+        $valor = limpiar_texto($valor);
+        if ($valor !== '' && preg_match('/^C_[A-Za-z0-9_]+$/', $valor) && tabla_fisica_existe($mysqli, $valor)) {
+            return $valor;
+        }
+    }
+
+    return '';
+}
+
+function obtener_tablas_campo_disponibles(mysqli $mysqli, ?int $idUsuario = null): array
+{
+    $idUsuario = $idUsuario ?: (int)($_SESSION['id'] ?? 0);
+
+    if ($idUsuario <= 0) {
+        return [];
+    }
+
+    // Importante: las carteras del filtro deben salir de la asignación real del usuario.
+    // No se listan todas las tablas activas de tabla_log porque eso muestra carteras que
+    // el usuario no tiene asignadas y puede confundir la operación.
+    $rows = query_all($mysqli, "
+        SELECT
+            tabla_log.*,
+            cartera.cartera AS cartera_nombre,
+            tabla_log.nombre AS tabla_nombre,
+            tabla_log.id AS id_table,
+            tabla_log.id_cartera AS id_cartera_log
+        FROM tabla_log
+        INNER JOIN asignacion_tabla
+            ON tabla_log.id = asignacion_tabla.id_tabla
+        INNER JOIN cartera
+            ON tabla_log.id_cartera = cartera.id
+        INNER JOIN cliente
+            ON cartera.idcliente = cliente.id
+        WHERE asignacion_tabla.id_usuario = ?
+          AND cartera.estado = 1
+          AND tabla_log.id_cartera IN (59, 63)
+          AND COALESCE(tabla_log.estado, 0) = 0
+        ORDER BY cartera.cartera ASC
+    ", 'i', [$idUsuario]);
+
+    $opciones = [];
+    $vistos = [];
+
+    foreach ($rows as $row) {
+        $tablaFisica = limpiar_texto($row['tabla_nombre'] ?? '');
+
+        if ($tablaFisica === '' || !preg_match('/^[A-Za-z0-9_]+$/', $tablaFisica) || !tabla_fisica_existe($mysqli, $tablaFisica)) {
+            $tablaFisica = resolver_nombre_tabla_log($mysqli, $row);
+        }
+
+        if ($tablaFisica === '') {
+            continue;
+        }
+
+        $idTable = (int)($row['id_table'] ?? 0);
+        $idCartera = (int)($row['id_cartera_log'] ?? 0);
+        if ($idTable <= 0 || $idCartera <= 0) {
+            continue;
+        }
+
+        if (isset($vistos[$idTable])) {
+            continue;
+        }
+        $vistos[$idTable] = true;
+
+        $cartera = limpiar_texto($row['cartera_nombre'] ?? '') ?: "Cartera {$idCartera}";
+
+        $opciones[] = [
+            'value' => (string)$idTable,
+            'label' => $cartera,
+            'id_table' => $idTable,
+            'id_cartera' => $idCartera,
+            'tabla' => $tablaFisica,
+            'cartera' => $cartera
+        ];
+    }
+
+    return $opciones;
+}
+
+function obtener_contexto_cartera(mysqli $mysqli, $idTableSolicitado = null): array
+{
+    $opciones = obtener_tablas_campo_disponibles($mysqli);
+    $idTableSolicitado = (int)($idTableSolicitado ?? 0);
+
+    foreach ($opciones as $opcion) {
+        if ((int)$opcion['id_table'] === $idTableSolicitado) {
+            return $opcion;
+        }
+    }
+
+    foreach ($opciones as $opcion) {
+        if ((int)$opcion['id_table'] === 2923) {
+            return $opcion;
+        }
+    }
+
+    if (!empty($opciones)) {
+        return $opciones[0];
+    }
+
+    throw new Exception('No se encontró una tabla de cartera campo disponible.');
+}
+
+function nombre_tabla_sql(array $ctx): string
+{
+    $tabla = limpiar_texto($ctx['tabla'] ?? '');
+    if ($tabla === '' || !preg_match('/^[A-Za-z0-9_]+$/', $tabla)) {
+        throw new Exception('Tabla de cartera inválida.');
+    }
+    return "`{$tabla}`";
+}
+
+
+function obtener_periodo_pago_actual(mysqli $mysqli): array
+{
+    $rows = query_all($mysqli, "
+        SELECT id_periodo, codigo, nombre, fecha_inicio, fecha_fin
+        FROM geocampo_periodo
+        WHERE activo = 1
+          AND CURDATE() BETWEEN fecha_inicio AND fecha_fin
+        ORDER BY fecha_inicio DESC
+        LIMIT 1
+    ");
+
+    if (empty($rows)) {
+        $rows = query_all($mysqli, "
+            SELECT id_periodo, codigo, nombre, fecha_inicio, fecha_fin
+            FROM geocampo_periodo
+            WHERE activo = 1
+            ORDER BY fecha_inicio DESC
+            LIMIT 1
+        ");
+    }
+
+    if (!empty($rows)) {
+        return [
+            'id_periodo' => (int)($rows[0]['id_periodo'] ?? 0),
+            'codigo' => limpiar_texto($rows[0]['codigo'] ?? ''),
+            'nombre' => limpiar_texto($rows[0]['nombre'] ?? ''),
+            'fecha_inicio' => limpiar_texto($rows[0]['fecha_inicio'] ?? ''),
+            'fecha_fin' => limpiar_texto($rows[0]['fecha_fin'] ?? ''),
+        ];
+    }
+
+    $inicioMes = date('Y-m-01');
+    $finMes = date('Y-m-t');
+
+    return [
+        'id_periodo' => 0,
+        'codigo' => date('Y-m'),
+        'nombre' => date('m/Y'),
+        'fecha_inicio' => $inicioMes,
+        'fecha_fin' => $finMes,
+    ];
+}
+
+function pago_exists_expr(mysqli $mysqli, array $ctx, array $periodo): string
+{
+    $idCartera = (int)($ctx['id_cartera'] ?? 0);
+    $fechaInicio = $mysqli->real_escape_string(limpiar_texto($periodo['fecha_inicio'] ?? date('Y-m-01')));
+    $fechaFin = $mysqli->real_escape_string(limpiar_texto($periodo['fecha_fin'] ?? date('Y-m-t')));
+
+    return "EXISTS (
+        SELECT 1
+        FROM pagos pg
+        WHERE pg.IDCARTERA = {$idCartera}
+          AND pg.IDENTIFICADOR = c.identificador
+          AND COALESCE(pg.IDESTADO, 0) = 0
+          AND DATE(pg.FECHAPAG) BETWEEN '{$fechaInicio}' AND '{$fechaFin}'
+        LIMIT 1
+    )";
+}
+
+function pago_fecha_expr(mysqli $mysqli, array $ctx, array $periodo): string
+{
+    $idCartera = (int)($ctx['id_cartera'] ?? 0);
+    $fechaInicio = $mysqli->real_escape_string(limpiar_texto($periodo['fecha_inicio'] ?? date('Y-m-01')));
+    $fechaFin = $mysqli->real_escape_string(limpiar_texto($periodo['fecha_fin'] ?? date('Y-m-t')));
+
+    return "(
+        SELECT MAX(pg.FECHAPAG)
+        FROM pagos pg
+        WHERE pg.IDCARTERA = {$idCartera}
+          AND pg.IDENTIFICADOR = c.identificador
+          AND COALESCE(pg.IDESTADO, 0) = 0
+          AND DATE(pg.FECHAPAG) BETWEEN '{$fechaInicio}' AND '{$fechaFin}'
+    )";
+}
+
+function pago_monto_expr(mysqli $mysqli, array $ctx, array $periodo): string
+{
+    $idCartera = (int)($ctx['id_cartera'] ?? 0);
+    $fechaInicio = $mysqli->real_escape_string(limpiar_texto($periodo['fecha_inicio'] ?? date('Y-m-01')));
+    $fechaFin = $mysqli->real_escape_string(limpiar_texto($periodo['fecha_fin'] ?? date('Y-m-t')));
+
+    return "(
+        SELECT COALESCE(SUM(pg.MONTO), 0)
+        FROM pagos pg
+        WHERE pg.IDCARTERA = {$idCartera}
+          AND pg.IDENTIFICADOR = c.identificador
+          AND COALESCE(pg.IDESTADO, 0) = 0
+          AND DATE(pg.FECHAPAG) BETWEEN '{$fechaInicio}' AND '{$fechaFin}'
+    )";
+}
+
+function construir_where_cuentas(mysqli $mysqli, array $filtros, string &$types, array &$params, array $ctx): string
 {
     $where = ["c.id IS NOT NULL"];
     $types = '';
     $params = [];
 
-    $fechaExpr = "DATE(COALESCE(c.FECHA_ACTUALIZACION, c.FECHAVEN, NOW()))";
+    $fechaExpr = fecha_cuenta_expr($mysqli, $ctx);
+    $carteraExpr = columna_cartera_cuenta_expr($mysqli, $ctx);
+    $periodoPago = obtener_periodo_pago_actual($mysqli);
+    $pagoExpr = pago_exists_expr($mysqli, $ctx, $periodoPago);
 
     if ($filtros['fechaDesde'] !== '') {
         $where[] = "{$fechaExpr} >= ?";
@@ -105,12 +437,6 @@ function construir_where_cuentas(array $filtros, string &$types, array &$params)
         $where[] = "{$fechaExpr} <= ?";
         $types .= 's';
         $params[] = $filtros['fechaHasta'];
-    }
-
-    if ($filtros['cartera'] !== '') {
-        $where[] = "COALESCE(car.cartera, c.ID_CARTERA) = ?";
-        $types .= 's';
-        $params[] = $filtros['cartera'];
     }
 
     if ($filtros['distrito'] !== '') {
@@ -134,6 +460,12 @@ function construir_where_cuentas(array $filtros, string &$types, array &$params)
         $where[] = "ga.id_asignacion IS NOT NULL";
     }
 
+    if (($filtros['pago'] ?? '') === 'si_pago') {
+        $where[] = $pagoExpr;
+    } elseif (($filtros['pago'] ?? '') === 'no_pago') {
+        $where[] = "NOT ({$pagoExpr})";
+    }
+
     if (($filtros['busqueda'] ?? '') !== '') {
         $where[] = "(
             c.NUMEROCUENTA LIKE ?
@@ -142,7 +474,7 @@ function construir_where_cuentas(array $filtros, string &$types, array &$params)
             OR c.NOMBRE LIKE ?
             OR c.PRODUCTO LIKE ?
             OR c.SUBPRODUCTO LIKE ?
-            OR c.ID_CARTERA LIKE ?
+            OR CAST({$carteraExpr} AS CHAR) LIKE ?
             OR COALESCE(car.cartera, '') LIKE ?
             OR COALESCE(d.DIRECCION_DEPURADA, '') LIKE ?
             OR COALESCE(d.DIRECCION, '') LIKE ?
@@ -171,6 +503,9 @@ function normalizar_cuentas(array $cuentas): array
         $cuenta['id_asignacion'] = $cuenta['id_asignacion'] !== null ? (int)$cuenta['id_asignacion'] : null;
         $cuenta['asesorId'] = $cuenta['asesorId'] !== null ? (int)$cuenta['asesorId'] : null;
         $cuenta['importe'] = (float)($cuenta['importe'] ?? 0);
+        $cuenta['tiene_pago'] = (int)($cuenta['tiene_pago'] ?? 0);
+        $cuenta['monto_pago'] = (float)($cuenta['monto_pago'] ?? 0);
+        $cuenta['estado_pago'] = $cuenta['tiene_pago'] === 1 ? 'Pago' : 'No pago';
 
         $direccionDepurada = limpiar_texto($cuenta['direccion_depurada'] ?? '');
         $direccionOriginal = limpiar_texto($cuenta['direccion_original'] ?? '');
@@ -209,22 +544,33 @@ function normalizar_cuentas(array $cuentas): array
     return $cuentas;
 }
 
-function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina, int $porPagina): array
+function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina, int $porPagina, array $ctx): array
 {
     $pagina = max(1, $pagina);
     $porPagina = in_array($porPagina, [5, 10, 15, 25, 50, 100], true) ? $porPagina : 10;
     $offset = ($pagina - 1) * $porPagina;
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $idTable = (int)$ctx['id_table'];
+    $idCarteraCtx = (int)$ctx['id_cartera'];
 
     $types = '';
     $params = [];
-    $where = construir_where_cuentas($filtros, $types, $params);
+    $where = construir_where_cuentas($mysqli, $filtros, $types, $params, $ctx);
+    $carteraExpr = columna_cartera_cuenta_expr($mysqli, $ctx);
+    $fechaExpr = fecha_cuenta_expr($mysqli, $ctx);
+    $periodoPago = obtener_periodo_pago_actual($mysqli);
+    $pagoExpr = pago_exists_expr($mysqli, $ctx, $periodoPago);
+    $pagoFechaExpr = pago_fecha_expr($mysqli, $ctx, $periodoPago);
+    $pagoMontoExpr = pago_monto_expr($mysqli, $ctx, $periodoPago);
 
     $from = "
-        FROM C_FINANCIERA_EFECTIVA_CAMPO c
+        FROM {$tablaCuentas} c
         LEFT JOIN cartera car
-            ON car.id = c.ID_CARTERA
+            ON car.id = {$carteraExpr}
         LEFT JOIN geocampo_asignacion ga
             ON ga.id_cuenta_campo = c.id
+        AND ga.id_table = {$idTable}
+        AND ga.id_cartera = {$idCarteraCtx}
         AND ga.activo = 1
         LEFT JOIN personal pa
             ON pa.IDPERSONAL = ga.id_asesor
@@ -275,9 +621,12 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             d.PROVINCIA AS provincia_dir,
             d.DISTRITO AS distrito_dir,
             c.MONTOACOBRAR AS importe,
-            c.ID_CARTERA AS id_cartera,
-            COALESCE(car.cartera, c.ID_CARTERA) AS cartera,
-            DATE(COALESCE(c.FECHA_ACTUALIZACION, c.FECHAVEN, NOW())) AS fecha,
+            {$carteraExpr} AS id_cartera,
+            COALESCE(car.cartera, CAST({$carteraExpr} AS CHAR)) AS cartera,
+            {$fechaExpr} AS fecha,
+            CASE WHEN {$pagoExpr} THEN 1 ELSE 0 END AS tiene_pago,
+            {$pagoFechaExpr} AS fecha_pago,
+            {$pagoMontoExpr} AS monto_pago,
             ga.id_asignacion,
             ga.id_asesor AS asesorId,
             ea.codigo AS estadoCodigo,
@@ -303,9 +652,11 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
     ];
 }
 
-function cargar_asesores(mysqli $mysqli): array
+function cargar_asesores(mysqli $mysqli, array $ctx): array
 {
     $idUsuario = (int)$_SESSION['id'];
+    $idTableCtx = (int)$ctx['id_table'];
+    $idCarteraCtx = (int)$ctx['id_cartera'];
 
     $asesoresSql = "
         SELECT
@@ -316,6 +667,8 @@ function cargar_asesores(mysqli $mysqli): array
                 SELECT COUNT(*)
                 FROM geocampo_asignacion ga_asig
                 WHERE ga_asig.id_asesor = p.IDPERSONAL
+                  AND ga_asig.id_table = {$idTableCtx}
+                  AND ga_asig.id_cartera = {$idCarteraCtx}
                   AND ga_asig.activo = 1
             ) AS asignadas,
 
@@ -329,6 +682,8 @@ function cargar_asesores(mysqli $mysqli): array
                 INNER JOIN geocampo_asignacion ga_sem
                     ON ga_sem.id_asignacion = hrd_sem.id_asignacion
                    AND ga_sem.activo = 1
+                   AND ga_sem.id_table = {$idTableCtx}
+                   AND ga_sem.id_cartera = {$idCarteraCtx}
                    AND ga_sem.id_asesor = p.IDPERSONAL
                 WHERE hr_sem.id_asesor = p.IDPERSONAL
                   AND er_sem.codigo NOT IN ('ANULADA', 'CERRADA')
@@ -353,7 +708,7 @@ function cargar_asesores(mysqli $mysqli): array
                 SELECT COUNT(*)
                 FROM GEOCAMPO g_hoy
                 WHERE g_hoy.IDPERSONAL = p.IDPERSONAL
-                  AND g_hoy.IDCARTERA = 63
+                  AND g_hoy.IDCARTERA = {$idCarteraCtx}
                   AND DATE(g_hoy.FECHA) = CURDATE()
             ) AS visitas_hoy,
 
@@ -361,7 +716,7 @@ function cargar_asesores(mysqli $mysqli): array
                 SELECT COUNT(*)
                 FROM GEOCAMPO g_sem
                 WHERE g_sem.IDPERSONAL = p.IDPERSONAL
-                  AND g_sem.IDCARTERA = 63
+                  AND g_sem.IDCARTERA = {$idCarteraCtx}
                   AND DATE(g_sem.FECHA) BETWEEN DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
                                           AND DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 6 DAY)
             ) AS visitas_semana
@@ -376,7 +731,7 @@ function cargar_asesores(mysqli $mysqli): array
               INNER JOIN cartera ca
                   ON tl.id_cartera = ca.id
               WHERE at.id_usuario = p.IDPERSONAL
-                AND tl.id_cartera = 63
+                AND tl.id_cartera = {$idCarteraCtx}
                 AND ca.estado = 1
                 AND tl.estado = 0
           )
@@ -401,19 +756,14 @@ function cargar_asesores(mysqli $mysqli): array
     return $asesores;
 }
 
-function cargar_filtros(mysqli $mysqli): array
+function cargar_filtros(mysqli $mysqli, array $ctx): array
 {
-    $carteras = query_all($mysqli, "
-        SELECT DISTINCT COALESCE(car.cartera, c.ID_CARTERA) AS valor
-        FROM C_FINANCIERA_EFECTIVA_CAMPO c
-        LEFT JOIN cartera car ON car.id = c.ID_CARTERA
-        WHERE c.ID_CARTERA IS NOT NULL AND TRIM(c.ID_CARTERA) <> ''
-        ORDER BY valor
-    ");
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $tablasCampo = obtener_tablas_campo_disponibles($mysqli);
 
     $distritos = query_all($mysqli, "
         SELECT DISTINCT d.DISTRITO AS valor
-        FROM C_FINANCIERA_EFECTIVA_CAMPO c
+        FROM {$tablaCuentas} c
         INNER JOIN (
             SELECT DISTINCT
                 DOC,
@@ -431,18 +781,22 @@ function cargar_filtros(mysqli $mysqli): array
 
     $segmentos = query_all($mysqli, "
         SELECT DISTINCT PRODUCTO AS valor
-        FROM C_FINANCIERA_EFECTIVA_CAMPO
+        FROM {$tablaCuentas}
         WHERE PRODUCTO IS NOT NULL AND TRIM(PRODUCTO) <> ''
         ORDER BY PRODUCTO
     ");
 
     return [
-        'carteras' => array_values(array_filter(array_map(fn($r) => limpiar_texto($r['valor']), $carteras))),
+        'carteras' => $tablasCampo,
         'distritos' => array_values(array_filter(array_map(fn($r) => limpiar_texto($r['valor']), $distritos))),
         'segmentos' => array_values(array_filter(array_map(fn($r) => limpiar_texto($r['valor']), $segmentos))),
         'estados' => [
             ['value' => 'sin_asignar', 'label' => 'Sin asignar'],
             ['value' => 'asignadas', 'label' => 'Asignadas']
+        ],
+        'pagos' => [
+            ['value' => 'si_pago', 'label' => 'Sí pago'],
+            ['value' => 'no_pago', 'label' => 'No pago']
         ]
     ];
 }
@@ -452,12 +806,15 @@ function cargar_inicial(mysqli $mysqli): void
     $pagina = max(1, (int)($_GET['page'] ?? 1));
     $porPagina = max(1, (int)($_GET['perPage'] ?? 10));
     $filtros = obtener_filtros_desde_array($_GET);
-    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina);
+    $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
+    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina, $ctx);
 
     responder_json([
         'ok' => true,
-        'asesores' => cargar_asesores($mysqli),
-        'filtros' => cargar_filtros($mysqli),
+        'tablaSeleccionada' => $ctx,
+        'periodoPago' => obtener_periodo_pago_actual($mysqli),
+        'asesores' => cargar_asesores($mysqli, $ctx),
+        'filtros' => cargar_filtros($mysqli, $ctx),
         'cuentas' => $resultadoCuentas['cuentas'],
         'paginacion' => $resultadoCuentas['paginacion']
     ]);
@@ -468,28 +825,39 @@ function cargar_cuentas(mysqli $mysqli): void
     $pagina = max(1, (int)($_GET['page'] ?? 1));
     $porPagina = max(1, (int)($_GET['perPage'] ?? 10));
     $filtros = obtener_filtros_desde_array($_GET);
-    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina);
+    $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
+    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina, $ctx);
 
     responder_json([
         'ok' => true,
+        'tablaSeleccionada' => $ctx,
+        'periodoPago' => obtener_periodo_pago_actual($mysqli),
+        'filtros' => cargar_filtros($mysqli, $ctx),
         'cuentas' => $resultadoCuentas['cuentas'],
         'paginacion' => $resultadoCuentas['paginacion']
     ]);
 }
 
-function obtener_ids_por_filtros(mysqli $mysqli, array $filtros): array
+function obtener_ids_por_filtros(mysqli $mysqli, array $filtros, array $ctx): array
 {
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $idTable = (int)$ctx['id_table'];
+    $idCarteraCtx = (int)$ctx['id_cartera'];
+
     $types = '';
     $params = [];
-    $where = construir_where_cuentas($filtros, $types, $params);
+    $where = construir_where_cuentas($mysqli, $filtros, $types, $params, $ctx);
+    $carteraExpr = columna_cartera_cuenta_expr($mysqli, $ctx);
 
     $sql = "
         SELECT c.id
-        FROM C_FINANCIERA_EFECTIVA_CAMPO c
+        FROM {$tablaCuentas} c
         LEFT JOIN cartera car
-            ON car.id = c.ID_CARTERA
+            ON car.id = {$carteraExpr}
         LEFT JOIN geocampo_asignacion ga
             ON ga.id_cuenta_campo = c.id
+        AND ga.id_table = {$idTable}
+        AND ga.id_cartera = {$idCarteraCtx}
         AND ga.activo = 1
         LEFT JOIN personal pa
             ON pa.IDPERSONAL = ga.id_asesor
@@ -520,7 +888,7 @@ function obtener_ids_por_filtros(mysqli $mysqli, array $filtros): array
 }
 
 
-function obtener_restricciones_reasignacion(mysqli $mysqli, array $ids, int $idAsesorDestino): array
+function obtener_restricciones_reasignacion(mysqli $mysqli, array $ids, int $idAsesorDestino, array $ctx): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0)));
 
@@ -530,6 +898,10 @@ function obtener_restricciones_reasignacion(mysqli $mysqli, array $ids, int $idA
             'pendientes_previas' => []
         ];
     }
+
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $idTable = (int)$ctx['id_table'];
+    $idCarteraCtx = (int)$ctx['id_cartera'];
 
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $types = str_repeat('i', count($ids)) . 'i';
@@ -555,11 +927,13 @@ function obtener_restricciones_reasignacion(mysqli $mysqli, array $ids, int $idA
             ON er.id_estado_ruta = hr.id_estado_ruta
         INNER JOIN geocampo_estado_visita ev
             ON ev.id_estado_visita = hrd.id_estado_visita
-        INNER JOIN C_FINANCIERA_EFECTIVA_CAMPO c
+        INNER JOIN {$tablaCuentas} c
             ON c.id = ga.id_cuenta_campo
         LEFT JOIN personal p
             ON p.IDPERSONAL = ga.id_asesor
         WHERE ga.activo = 1
+          AND ga.id_table = {$idTable}
+          AND ga.id_cartera = {$idCarteraCtx}
           AND ga.id_cuenta_campo IN ({$placeholders})
           AND ga.id_asesor <> ?
           AND er.codigo NOT IN ('ANULADA', 'CERRADA')
@@ -616,7 +990,7 @@ function validar_reasignacion_sin_hoja_ruta(mysqli $mysqli, array $ids, int $idA
     return;
 }
 
-function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int $idSupervisor): int
+function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int $idSupervisor, array $ctx): int
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0)));
 
@@ -628,6 +1002,9 @@ function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int 
         throw new Exception('Asesor inválido.');
     }
 
+    $idTable = (int)$ctx['id_table'];
+    $idCarteraCtx = (int)$ctx['id_cartera'];
+
     // Regla de umbral abierto: se permite reasignar aunque la cuenta tenga ruta o visitas previas.
     // La ruta histórica queda como trazabilidad de la asignación anterior y la nueva asignación queda activa.
 
@@ -635,13 +1012,13 @@ function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int 
     $idTipoAsignacion = obtener_id_catalogo($mysqli, 'geocampo_tipo_movimiento_asignacion', 'id_tipo_movimiento', 'ASIGNACION');
     $idTipoReasignacion = obtener_id_catalogo($mysqli, 'geocampo_tipo_movimiento_asignacion', 'id_tipo_movimiento', 'REASIGNACION');
 
-    $selectActual = $mysqli->prepare("\n        SELECT id_asignacion, id_asesor\n        FROM geocampo_asignacion\n        WHERE id_cuenta_campo = ?\n          AND activo = 1\n        ORDER BY id_asignacion DESC\n        LIMIT 1\n    ");
+    $selectActual = $mysqli->prepare("\n        SELECT id_asignacion, id_asesor\n        FROM geocampo_asignacion\n        WHERE id_cuenta_campo = ?\n          AND id_table = ?\n          AND id_cartera = ?\n          AND activo = 1\n        ORDER BY id_asignacion DESC\n        LIMIT 1\n    ");
 
     $desactivarActual = $mysqli->prepare("\n        UPDATE geocampo_asignacion\n        SET activo = 0,\n            fecha_actualizacion = NOW()\n        WHERE id_asignacion = ?\n    ");
 
-    $insertAsignacion = $mysqli->prepare("\n        INSERT INTO geocampo_asignacion (\n            id_cuenta_campo,\n            id_asesor,\n            id_supervisor,\n            id_estado_asignacion,\n            fecha_asignacion,\n            activo\n        ) VALUES (?, ?, ?, ?, NOW(), 1)\n    ");
+    $insertAsignacion = $mysqli->prepare("\n        INSERT INTO geocampo_asignacion (\n            id_cuenta_campo,\n            id_table,\n            id_cartera,\n            id_asesor,\n            id_supervisor,\n            id_estado_asignacion,\n            fecha_asignacion,\n            activo\n        ) VALUES (?, ?, ?, ?, ?, ?, NOW(), 1)\n    ");
 
-    $insertHistorial = $mysqli->prepare("\n        INSERT INTO geocampo_asignacion_historial (\n            id_asignacion,\n            id_cuenta_campo,\n            id_asesor_anterior,\n            id_asesor_nuevo,\n            id_supervisor,\n            id_tipo_movimiento,\n            observacion,\n            fecha_movimiento\n        ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())\n    ");
+    $insertHistorial = $mysqli->prepare("\n        INSERT INTO geocampo_asignacion_historial (\n            id_asignacion,\n            id_cuenta_campo,\n            id_table,\n            id_cartera,\n            id_asesor_anterior,\n            id_asesor_nuevo,\n            id_supervisor,\n            id_tipo_movimiento,\n            observacion,\n            fecha_movimiento\n        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())\n    ");
 
     if (!$selectActual || !$desactivarActual || !$insertAsignacion || !$insertHistorial) {
         throw new Exception('Error preparando sentencias de asignación: ' . $mysqli->error);
@@ -650,7 +1027,7 @@ function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int 
     $procesadas = 0;
 
     foreach ($ids as $idCuentaCampo) {
-        $selectActual->bind_param('i', $idCuentaCampo);
+        $selectActual->bind_param('iii', $idCuentaCampo, $idTable, $idCarteraCtx);
         $selectActual->execute();
         $actual = $selectActual->get_result()->fetch_assoc();
 
@@ -667,7 +1044,7 @@ function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int 
             $desactivarActual->execute();
         }
 
-        $insertAsignacion->bind_param('iiii', $idCuentaCampo, $idAsesor, $idSupervisor, $idEstadoPendiente);
+        $insertAsignacion->bind_param('iiiiii', $idCuentaCampo, $idTable, $idCarteraCtx, $idAsesor, $idSupervisor, $idEstadoPendiente);
         $insertAsignacion->execute();
         $idAsignacionNueva = (int)$mysqli->insert_id;
 
@@ -676,9 +1053,11 @@ function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int 
             : 'Asignación';
 
         $insertHistorial->bind_param(
-            'iiiiiis',
+            'iiiiiiiis',
             $idAsignacionNueva,
             $idCuentaCampo,
+            $idTable,
+            $idCarteraCtx,
             $idAsesorAnterior,
             $idAsesor,
             $idSupervisor,
@@ -698,7 +1077,7 @@ function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int 
     return $procesadas;
 }
 
-function obtener_resumen_reasignacion(mysqli $mysqli, array $ids, int $idAsesorDestino): array
+function obtener_resumen_reasignacion(mysqli $mysqli, array $ids, int $idAsesorDestino, array $ctx): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0)));
 
@@ -709,6 +1088,10 @@ function obtener_resumen_reasignacion(mysqli $mysqli, array $ids, int $idAsesorD
             'grupos' => []
         ];
     }
+
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $idTable = (int)$ctx['id_table'];
+    $idCarteraCtx = (int)$ctx['id_cartera'];
 
     $placeholders = implode(',', array_fill(0, count($ids), '?'));
     $types = str_repeat('i', count($ids)) . 'i';
@@ -722,11 +1105,13 @@ function obtener_resumen_reasignacion(mysqli $mysqli, array $ids, int $idAsesorD
             c.NUMEROCUENTA AS cuenta,
             c.NOMBRE AS cliente
         FROM geocampo_asignacion ga
-        INNER JOIN C_FINANCIERA_EFECTIVA_CAMPO c
+        INNER JOIN {$tablaCuentas} c
             ON c.id = ga.id_cuenta_campo
         LEFT JOIN personal p
             ON p.IDPERSONAL = ga.id_asesor
         WHERE ga.activo = 1
+          AND ga.id_table = {$idTable}
+          AND ga.id_cartera = {$idCarteraCtx}
           AND ga.id_cuenta_campo IN ({$placeholders})
           AND ga.id_asesor <> ?
         ORDER BY asesor_actual, c.NUMEROCUENTA
@@ -766,7 +1151,8 @@ function obtener_resumen_reasignacion(mysqli $mysqli, array $ids, int $idAsesorD
 function ids_filtrados(mysqli $mysqli): void
 {
     $filtros = obtener_filtros_desde_array($_GET);
-    $ids = obtener_ids_por_filtros($mysqli, $filtros);
+    $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
+    $ids = obtener_ids_por_filtros($mysqli, $filtros, $ctx);
 
     responder_json([
         'ok' => true,
@@ -790,14 +1176,16 @@ function preview_reasignacion(mysqli $mysqli): void
     $ids = [];
     if (!empty($input['usarFiltros'])) {
         $filtros = obtener_filtros_desde_array($input['filtros'] ?? []);
-        $ids = obtener_ids_por_filtros($mysqli, $filtros);
+        $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
+        $ids = obtener_ids_por_filtros($mysqli, $filtros, $ctx);
     } else {
         $ids = $input['ids'] ?? [];
+        $ctx = obtener_contexto_cartera($mysqli, $input['cartera'] ?? '');
     }
 
     // Umbral abierto: el preview solo informa si la cuenta ya pertenece a otro gestor.
     // No bloquea por ruta, visita o pendiente anterior.
-    $resumen = obtener_resumen_reasignacion($mysqli, $ids, $idAsesor);
+    $resumen = obtener_resumen_reasignacion($mysqli, $ids, $idAsesor, $ctx);
 
     $totalEvaluadas = count(array_values(array_unique(array_filter(array_map('intval', $ids), fn($id) => $id > 0))));
 
@@ -817,10 +1205,11 @@ function asignar(mysqli $mysqli): void
     $ids = $input['ids'] ?? [];
     $idAsesor = (int)($input['asesorId'] ?? 0);
     $idSupervisor = (int)$_SESSION['id'];
+    $ctx = obtener_contexto_cartera($mysqli, $input['cartera'] ?? '');
 
     try {
         $mysqli->begin_transaction();
-        $procesadas = procesar_asignacion_ids($mysqli, $ids, $idAsesor, $idSupervisor);
+        $procesadas = procesar_asignacion_ids($mysqli, $ids, $idAsesor, $idSupervisor, $ctx);
         $mysqli->commit();
 
         responder_json([
@@ -848,12 +1237,13 @@ function asignar_filtradas(mysqli $mysqli): void
     $idAsesor = (int)($input['asesorId'] ?? 0);
     $filtros = obtener_filtros_desde_array($input['filtros'] ?? []);
     $idSupervisor = (int)$_SESSION['id'];
+    $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
 
     try {
-        $ids = obtener_ids_por_filtros($mysqli, $filtros);
+        $ids = obtener_ids_por_filtros($mysqli, $filtros, $ctx);
 
         $mysqli->begin_transaction();
-        $procesadas = procesar_asignacion_ids($mysqli, $ids, $idAsesor, $idSupervisor);
+        $procesadas = procesar_asignacion_ids($mysqli, $ids, $idAsesor, $idSupervisor, $ctx);
         $mysqli->commit();
 
         responder_json([

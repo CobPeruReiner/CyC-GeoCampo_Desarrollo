@@ -282,6 +282,7 @@ function setControlesDisabled(disabled) {
     "#filtroDistrito",
     "#filtroSegmento",
     "#filtroEstado",
+    "#filtroPago",
     "#btnLimpiarFiltros",
     "#checkTodos",
     "#btnCantidadPagina",
@@ -302,6 +303,7 @@ function obtenerFiltros() {
     distrito: $("#filtroDistrito").value,
     segmento: $("#filtroSegmento").value,
     estado: $("#filtroEstado").value,
+    pago: $("#filtroPago") ? $("#filtroPago").value : "",
     busqueda: $("#busquedaGlobal") ? $("#busquedaGlobal").value.trim() : "",
   };
 }
@@ -329,6 +331,7 @@ function renderLoaderTabla() {
         <td class="py-4 px-3"><div class="h-4 w-20 bg-gray-200 rounded"></div></td>
         <td class="py-4 px-3"><div class="h-4 w-28 bg-gray-200 rounded"></div></td>
         <td class="py-4 px-3"><div class="h-6 w-24 bg-gray-200 rounded-full"></div></td>
+        <td class="py-4 px-3"><div class="h-6 w-20 bg-gray-200 rounded-full"></div></td>
       </tr>
     `;
   }
@@ -367,7 +370,7 @@ function renderCuentas() {
   if (cuentas.length === 0) {
     $("#tablaCuentas").innerHTML = `
       <tr>
-        <td colspan="8" class="px-4 py-8 text-center text-gray-400">
+        <td colspan="9" class="px-4 py-8 text-center text-gray-400">
           No se encontraron cuentas con los filtros seleccionados.
         </td>
       </tr>
@@ -378,6 +381,11 @@ function renderCuentas() {
   $("#tablaCuentas").innerHTML = cuentas
     .map((cuenta) => {
       const seleccionada = cuentasSeleccionadas.includes(cuenta.id);
+
+      const tienePago = Number(cuenta.tiene_pago || 0) === 1;
+      const pagoTitulo = tienePago
+        ? `Fecha: ${cuenta.fecha_pago || "-"} | Monto: ${formatoMoneda(cuenta.monto_pago || 0)}`
+        : "Sin pago registrado en el periodo";
 
       return `
         <tr class="${seleccionada ? "bg-blue-50/60" : "bg-white"} hover:bg-blue-50/40">
@@ -413,6 +421,13 @@ function renderCuentas() {
             <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 border text-gray-500">
               <i data-lucide="clock-3" class="w-3 h-3"></i>
               ${escaparHTML(cuenta.estado)}
+            </span>
+          </td>
+
+          <td class="px-3 py-3">
+            <span title="${escaparHTML(pagoTitulo)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${tienePago ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-red-50 border-red-100 text-red-700"}">
+              <i data-lucide="${tienePago ? "badge-check" : "circle-x"}" class="w-3 h-3"></i>
+              ${tienePago ? "Pago" : "No pago"}
             </span>
           </td>
         </tr>
@@ -863,13 +878,17 @@ async function cargarCuentas() {
     paginacion = data.paginacion || paginacion;
     paginaActual = paginacion.pagina;
 
+    if (data.tablaSeleccionada?.id_table && $("#filtroCartera").value === "") {
+      $("#filtroCartera").value = String(data.tablaSeleccionada.id_table);
+    }
+
     cargandoCuentas = false;
     render();
   } catch (error) {
     cargandoCuentas = false;
     $("#tablaCuentas").innerHTML = `
       <tr>
-        <td colspan="8" class="px-4 py-8 text-center text-red-500">
+        <td colspan="9" class="px-4 py-8 text-center text-red-500">
           ${escaparHTML(error.message)}
         </td>
       </tr>
@@ -915,8 +934,12 @@ async function cargarDatosIniciales() {
     setSelectOptions(
       $("#filtroCartera"),
       filtrosBackend.carteras || [],
-      "Todas",
+      "Seleccione cartera",
     );
+
+    if (data.tablaSeleccionada?.id_table) {
+      $("#filtroCartera").value = String(data.tablaSeleccionada.id_table);
+    }
     setSelectOptions(
       $("#filtroDistrito"),
       filtrosBackend.distritos || [],
@@ -928,6 +951,7 @@ async function cargarDatosIniciales() {
       "Todos",
     );
     setSelectOptions($("#filtroEstado"), filtrosBackend.estados || [], "Todos");
+    setSelectOptions($("#filtroPago"), filtrosBackend.pagos || [], "Todos");
 
     $("#filtroFecha").disabled = false;
     $("#filtroFechaHasta").disabled = false;
@@ -954,7 +978,7 @@ async function cargarDatosIniciales() {
     setControlesDisabled(false);
     $("#tablaCuentas").innerHTML = `
       <tr>
-        <td colspan="8" class="px-4 py-8 text-center text-red-500">
+        <td colspan="9" class="px-4 py-8 text-center text-red-500">
           ${escaparHTML(error.message)}
         </td>
       </tr>
@@ -976,6 +1000,13 @@ async function recargarDespuesDeAsignar() {
   filtrosBackend = dataInicial.filtros || filtrosBackend;
   paginacion = dataInicial.paginacion || paginacion;
   paginaActual = paginacion.pagina;
+
+  if (
+    dataInicial.tablaSeleccionada?.id_table &&
+    $("#filtroCartera").value === ""
+  ) {
+    $("#filtroCartera").value = String(dataInicial.tablaSeleccionada.id_table);
+  }
 }
 
 async function obtenerIdsFiltrados() {
@@ -1046,6 +1077,7 @@ async function confirmarReasignacion({
     ids,
     usarFiltros,
     filtros: usarFiltros ? obtenerFiltros() : undefined,
+    cartera: $("#filtroCartera").value,
     asesorId: asesor.id,
   });
 
@@ -1094,6 +1126,7 @@ async function asignarCuentas(ids) {
 
     const data = await apiPost("asignar", {
       ids,
+      cartera: $("#filtroCartera").value,
       asesorId: asesor.id,
     });
 
@@ -1308,6 +1341,7 @@ document.addEventListener("click", (event) => {
   "#filtroDistrito",
   "#filtroSegmento",
   "#filtroEstado",
+  "#filtroPago",
 ].forEach((selector) => {
   $(selector).addEventListener("change", () => {
     const fechaDesde = $("#filtroFecha").value;

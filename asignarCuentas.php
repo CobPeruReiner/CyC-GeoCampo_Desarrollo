@@ -113,7 +113,7 @@ if (empty($_SESSION['id'])) {
 
         <!-- Campos -->
         <div class="p-5">
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
 
             <div class="space-y-1.5">
               <label for="filtroFecha" class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
@@ -172,6 +172,17 @@ if (empty($_SESSION['id'])) {
                 Asesor / Estado
               </label>
               <select id="filtroEstado" disabled
+                class="w-full h-10 rounded-xl bg-gray-50 border border-gray-200 px-3 text-xs text-gray-800 outline-none focus:bg-white focus:border-[#FF161A] focus:ring-4 focus:ring-red-50 disabled:opacity-60 transition">
+                <option value="">Cargando...</option>
+              </select>
+            </div>
+
+            <div class="space-y-1.5">
+              <label for="filtroPago" class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
+                <i data-lucide="badge-check" class="w-3.5 h-3.5 text-gray-400"></i>
+                Estado de pago
+              </label>
+              <select id="filtroPago" disabled
                 class="w-full h-10 rounded-xl bg-gray-50 border border-gray-200 px-3 text-xs text-gray-800 outline-none focus:bg-white focus:border-[#FF161A] focus:ring-4 focus:ring-red-50 disabled:opacity-60 transition">
                 <option value="">Cargando...</option>
               </select>
@@ -276,6 +287,7 @@ if (empty($_SESSION['id'])) {
                   <th class="px-3 py-3 text-left">Importe</th>
                   <th class="px-3 py-3 text-left">Asesor Actual</th>
                   <th class="px-3 py-3 text-left">Estado</th>
+                  <th class="px-3 py-3 text-left">Pago</th>
                 </tr>
               </thead>
 
