@@ -1,0 +1,43 @@
+<div
+  class="modal fade"
+  id="modalSesionExpirada"
+  tabindex="-1"
+  aria-labelledby="modalSesionLabel"
+  aria-hidden="true"
+  style="display: none"
+>
+  <div class="modal-dialog modal-dialog-centered">
+    <div
+      class="modal-content shadow-lg rounded-4 border-0"
+      style="font-family: &quot;Montserrat&quot;, sans-serif"
+    >
+      <!-- Encabezado moderno -->
+      <div
+        class="modal-header border-0 text-white"
+        style="background-color: #222"
+      >
+        <h5 class="modal-title text-white" id="modalSesionLabel">
+          <i class="fas fa-unlink me-2 text-warning"></i> Sesión finalizada
+        </h5>
+      </div>
+
+      <!-- Cuerpo claro -->
+      <div class="modal-body text-center text-secondary fs-5 px-4">
+        <p class="mb-3">
+          Tu sesión fue cerrada porque iniciaste sesión desde otro dispositivo.
+        </p>
+        <i class="fas fa-user-lock fa-3x text-muted mb-3"></i>
+      </div>
+
+      <!-- Botón elegante -->
+      <div class="modal-footer justify-content-center border-0 pb-4">
+        <a
+          href="index.php"
+          class="btn btn-dark px-4 py-2 rounded-pill shadow-sm"
+        >
+          <i class="fas fa-sign-in-alt me-2"></i> Iniciar sesión nuevamente
+        </a>
+      </div>
+    </div>
+  </div>
+</div>

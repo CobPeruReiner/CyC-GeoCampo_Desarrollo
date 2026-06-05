@@ -1,0 +1,16 @@
+services:
+  geocampo:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: geocampo-67
+    restart: unless-stopped
+    environment:
+      - IS_DOCKER=1
+      - GEOCAMPO_BASE_URL=http://192.168.1.67:4007
+      - GEOCAMPO_UPLOAD_DIR=/app/fotos
+    volumes:
+      - .:/app:ro
+      - ./fotos:/app/fotos
+    ports:
+      - "4007:4007"

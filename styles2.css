@@ -1,0 +1,234 @@
+/* Reset de estilos */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Estilos generales */
+body {
+  margin: 10;
+  font-family: "Montserrat", sans-serif; /* Fuente Google Fonts */
+  background-color: #f8f9fc;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+h3 {
+  font-weight: 600;
+  color: #343a40;
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+h5 {
+  text-align: center;
+  color: #007bff;
+  font-weight: 500;
+  margin-bottom: 1.5rem;
+}
+
+.card {
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.05);
+  margin-bottom: 1.5rem;
+  transition: all 0.2s ease-in-out;
+}
+
+.card:hover {
+  transform: scale(1.01);
+}
+
+.card-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #007bff;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+label {
+  font-weight: 500;
+  color: #555;
+}
+
+.container {
+  max-width: 900px;
+  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+  border-radius: 5px;
+  text-align: center;
+  margin-top: 50px;
+}
+
+h2 {
+  margin-bottom: 20px;
+  color: #333;
+  text-align: center;
+}
+
+.img-container {
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.img-container img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto; /* Centrar horizontalmente */
+}
+
+/* Estilos del formulario */
+.form-control {
+  border-radius: 8px;
+  transition: box-shadow 0.3s ease;
+}
+
+.form-control:focus {
+  box-shadow: 0 0 0 0.15rem rgba(0, 123, 255, 0.3);
+  border-color: #007bff;
+}
+
+.btn-success {
+  background: linear-gradient(to right, #28a745, #218838);
+  border: none;
+  border-radius: 25px;
+  padding: 0.75rem 2.5rem;
+  font-size: 1.1rem;
+  box-shadow: 0 4px 12px rgba(40, 167, 69, 0.2);
+  transition: background 0.3s ease;
+}
+
+.btn-success:hover {
+  background: linear-gradient(to right, #218838, #1e7e34);
+}
+
+.form-section-icon {
+  font-size: 1.2rem;
+  color: #17a2b8;
+}
+
+input[type="text"],
+input[type="password"] {
+  width: 100%;
+  padding: 10px;
+  margin-bottom: 10px;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+}
+
+/* button:not(.no-estilo) {
+    width: 100%;
+    background-color: #272727;
+    color: #fff;
+    border: none;
+    border-radius: 5px;
+    padding: 10px 20px;
+    cursor: pointer;
+} */
+button {
+  width: 100%;
+  background-color: #272727;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 10px 20px;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: #424242;
+}
+
+/* Estilos de mensajes de error */
+.error-message {
+  color: #a32d2d;
+  margin-top: 10px;
+
+  text-align: center;
+}
+
+/* Estilos de la página de menú */
+.menu-container {
+  width: 100%;
+  max-width: 600px;
+  padding: 20px;
+  background-color: #fff;
+  border-radius: 5px;
+  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.2);
+  text-align: center;
+}
+
+/* Estilos del enlace de cierre de sesión */
+a {
+  display: block;
+  text-align: center;
+  margin-top: 10px;
+  color: #272727;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+.custom-list-group {
+  border: none;
+  background-color: #ffffff; /* Fondo gris claro */
+}
+
+.custom-list-group-item {
+  border: 2px solid #e7e7e7;
+  background-color: #f1f1f1; /* Fondo blanco */
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.custom-list-group-item i {
+  margin-right: 8px; /* Espacio entre el ícono y el texto */
+}
+
+/* Estilos responsivos */
+@media (max-width: 768px) {
+  .container {
+    max-width: 100%;
+  }
+
+  .menu-container {
+    max-width: 100%;
+  }
+}
+
+/* Estilos responsivos */
+@media (max-width: 768px) {
+  .table {
+    max-height: none; /* Elimina la altura máxima en dispositivos móviles */
+    overflow-y: visible; /* Muestra todos los elementos sin barra de desplazamiento */
+  }
+}
+
+h2 {
+  font-size: 24px; /* Tamaño de fuente del título */
+}
+
+/* Alinear al centro verticalmente en dispositivos móviles */
+@media (max-width: 768px) {
+  .container {
+    margin-top: 0; /* Eliminar espacio superior en dispositivos móviles */
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+}
+
+/* Estilos para el botón de retorno al menú en dispositivos móviles */
+@media (max-width: 768px) {
+  /* Centrar el botón horizontalmente */
+  .btn-secondary {
+    margin: 10px auto;
+    display: block;
+  }
+}

@@ -1,0 +1,11 @@
+certbot/conf/
+certbot/log/
+certbot/www/*
+!certbot/www/.gitkeep
+
+node_modules/
+npm-debug.log
+
+.env
+
+fotos

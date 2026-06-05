@@ -1,0 +1,6 @@
+[06-Dec-2023 20:09:04 America/Lima] PHP Warning:  require(test.php): failed to open stream: No such file or directory in D:\xamp2\htdocs\GEOCAMPO\index.php on line 8
+
+[06-Dec-2023 20:09:04 America/Lima] PHP Fatal error:  require(): Failed opening required 'test.php' (include_path='D:\xamp2\php\PEAR') in D:\xamp2\htdocs\GEOCAMPO\index.php on line 8
+
+[29-Jan-2026 12:24:24 America/Lima] PHP Notice:  Undefined variable: userId in C:\xampp\htdocs\3.CyC-GeoCampo_67\CyC-GeoCampo\rutaCliente.php on line 238
+[29-Jan-2026 12:24:37 America/Lima] PHP Notice:  Undefined variable: userId in C:\xampp\htdocs\3.CyC-GeoCampo_67\CyC-GeoCampo\rutaCliente.php on line 238
