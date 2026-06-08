@@ -642,7 +642,7 @@ $_SESSION['id_ruta_asesor'] = $idUsuario;
 
         function renderTablaHistorial(pageItems, fuente) {
             if (!pageItems.length) {
-                return `<div class="p-4 rounded-xl bg-gray-50 text-gray-500 text-sm">Sin gestiones de ${fuente === 'CAMPO' ? 'campo' : 'call'}</div>`;
+                return `<div class="p-4 rounded-xl bg-gray-50 text-gray-500 text-sm">Sin gestiones de ${fuente === 'CAMPO' ? 'campo' : 'call'} para el filtro aplicado.</div>`;
             }
 
             const renderExtra = (it) => `
@@ -831,13 +831,13 @@ $_SESSION['id_ruta_asesor'] = $idUsuario;
                     </div>
                     <div class="rounded-2xl border border-gray-200 overflow-hidden">
                       <div class="px-4 py-3 bg-emerald-50 border-b border-emerald-100 flex items-center gap-2 font-bold text-emerald-800">
-                        <i data-lucide="map-pin" class="w-4 h-4"></i> Gestiones de campo
+                        <i data-lucide="map-pin" class="w-4 h-4"></i> Gestiones de campo / GEOCAMPO
                       </div>
                       <div id="hist-contenido-CAMPO" class="p-3">${renderHistorialFuente('CAMPO')}</div>
                     </div>
                     <div class="rounded-2xl border border-gray-200 overflow-hidden">
                       <div class="px-4 py-3 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2 font-bold text-indigo-800">
-                        <i data-lucide="headphones" class="w-4 h-4"></i> Gestiones de Call
+                        <i data-lucide="headphones" class="w-4 h-4"></i> Gestiones de call / gestion_tmk
                       </div>
                       <div id="hist-contenido-CALL" class="p-3">${renderHistorialFuente('CALL')}</div>
                     </div>
@@ -916,15 +916,59 @@ $_SESSION['id_ruta_asesor'] = $idUsuario;
             }
         }
 
-        window.abrirGestion = function(index) {
+        window.abrirGestion = async function(index) {
             const c = state.cuentas[index];
+            const tablaNombre = c.tabla_nombre || c.id_tabla || '';
+            const identificador = c.identificador || '';
+            const idCartera = c.id_cartera || c.idcartera || '';
+            const dni = c.documento || c.identificador || '';
+
+            if (!tablaNombre || !identificador || !idCartera) {
+                abrirModal('Asignar gestión', `${c.cliente || ''} · ${c.documento || ''}`, `
+                  <div class="p-4 rounded-xl bg-red-50 text-red-700 text-sm">
+                    No se pudo abrir el formulario por falta de información.
+                  </div>
+                `);
+                return;
+            }
+
             abrirModal('Asignar gestión', `${c.cliente} · ${c.documento}`, `
-        <div class="p-5 rounded-2xl bg-gray-50 border border-gray-200 text-sm text-gray-600">
-          <div class="w-12 h-12 rounded-xl bg-green-100 text-green-700 flex items-center justify-center mb-3"><i data-lucide="shield-plus" class="w-6 h-6"></i></div>
-          <p class="font-semibold text-gray-800 mb-1">Modal preparado</p>
-          <p>Este espacio queda listo para integrar el formulario de gestión de campo.</p>
-        </div>
-      `);
+              <div class="p-5 rounded-2xl bg-gray-50 border border-gray-200 text-sm text-gray-600">
+                <div class="w-12 h-12 rounded-xl bg-green-100 text-green-700 flex items-center justify-center mb-3">
+                  <i data-lucide="loader-circle" class="w-6 h-6 animate-spin"></i>
+                </div>
+                <p class="font-semibold text-gray-800 mb-1">Preparando formulario</p>
+                <p>Estamos cargando la información del cliente para registrar la gestión.</p>
+              </div>
+            `);
+
+            const destino = `agregargestion2.php?id_tabla=${encodeURIComponent(tablaNombre)}&identificador=${encodeURIComponent(identificador)}&id_cartera=${encodeURIComponent(idCartera)}`;
+
+            try {
+                const formData = new FormData();
+                formData.append('id_tabla', tablaNombre);
+                formData.append('dni', dni);
+                formData.append('idCartera', idCartera);
+
+                const res = await fetch('get_info_personal.php', {
+                    method: 'POST',
+                    body: formData,
+                    credentials: 'same-origin'
+                });
+
+                if (!res.ok) {
+                    throw new Error('No se pudo preparar la información del cliente.');
+                }
+
+                await res.text();
+                window.location.href = destino;
+            } catch (err) {
+                abrirModal('Asignar gestión', `${c.cliente} · ${c.documento}`, `
+                  <div class="p-4 rounded-xl bg-red-50 text-red-700 text-sm">
+                    ${escapeHtml(err.message || 'No se pudo abrir el formulario de gestión.')}
+                  </div>
+                `);
+            }
         }
 
         let buscarTimer = null;

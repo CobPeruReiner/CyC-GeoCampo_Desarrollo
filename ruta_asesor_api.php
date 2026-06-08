@@ -369,6 +369,8 @@ function listar_cuentas_ruta(mysqli $mysqli, int $idUsuario, int $idTable, strin
             'cantidad_visitas' => (int)$row['cantidad_visitas'],
             'id_table' => $idTable,
             'idcartera' => $idCartera,
+            'id_cartera' => $idCartera,
+            'tabla_nombre' => $tableName,
         ];
     }
 

@@ -22,6 +22,7 @@ const estado = {
     hasta: 0,
   },
   seleccionGlobalCargando: false,
+  timerBusqueda: null,
   dragTablaId: null,
   dragRutaId: null,
   mapaDireccion: null,
@@ -528,6 +529,7 @@ function obtenerFiltros() {
     producto: $("#filtroProducto").value,
     estadoVisita: $("#filtroEstadoVisita").value,
     rangoImporte: $("#filtroRangoImporte").value,
+    busqueda: $("#buscadorCuentas")?.value.trim() || "",
     criterioRuta: $("#criterioRuta").value || "CERCANIA",
     page: estado.pagina,
     perPage: estado.porPagina,
@@ -1789,6 +1791,14 @@ function configurarEventos() {
     estado.porPagina = Number($("#cuentasPorPagina").value || 10);
     estado.pagina = 1;
     await cargarCuentas();
+  });
+
+  $("#buscadorCuentas")?.addEventListener("input", () => {
+    clearTimeout(estado.timerBusqueda);
+    estado.timerBusqueda = setTimeout(async () => {
+      estado.pagina = 1;
+      await cargarCuentas();
+    }, 350);
   });
 
   $("#checkTodos").addEventListener("change", async () => {

@@ -5,87 +5,103 @@ ini_set('ignore_repeated_errors', TRUE);
 ini_set('display_errors', FALSE);
 ini_set('log_errors', TRUE);
 ini_set("error_log", 'debug.log');
-// require 'test.php';
 ?>
 <!DOCTYPE html>
 <html lang="es">
 
 <head>
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GCAMPO COBPERU</title>
+    <title>GCAMPO COBPERU | Iniciar sesión</title>
 
-    <!-- Fuentes -->
-    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;500&display=swap" rel="stylesheet">
-
-    <!-- Bootstrap 5 CSS -->
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-
-    <!-- Tu CSS personalizado -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
     <link rel="stylesheet" href="styles.css">
-
-    <!-- Font Awesome desde CDN (sin CORS) -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" integrity="sha512-yTq3qK4iHaewyFHzQ+GtZJmD7qY51rnkPU/NWB+Xx6iCPZJItXp6ykmK9EoTGlZQY6zzjBK12a+3S3mG3BPpTQ==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-
-    <style>
-        body {
-            font-family: 'Montserrat', sans-serif;
-        }
-    </style>
 </head>
 
 <body>
-    <!-- Contenedor del formulario de inicio de sesión -->
-    <div class="login-container">
-        <div class="img-container">
-            <img src="imagenes/login.jpg" alt="Imagen de inicio de sesión">
-        </div>
-        <h2>GCAMPO COBPERU | Iniciar Sesión</h2>
-        <form id="login-form" action="login.php" method="post">
-            <input type="text" name="usuario" placeholder="Usuario" required>
-            <input type="password" name="contrasena" placeholder="Contraseña" required>
-            <button type="submit">Ingresar</button>
-        </form>
-        <div id="error-message" class="error-message"></div>
-    </div>
+    <main class="login-shell">
+        <section class="login-card" aria-label="Formulario de inicio de sesión">
+            <div class="login-hero" aria-hidden="true">
+                <div class="hero-overlay"></div>
+                <img src="imagenes/login.jpg" alt="">
+                <div class="hero-content">
+                    <span class="brand-pill"><i class="fa-solid fa-location-dot"></i> GEOCAMPO</span>
+                    <h1>Gestión de campo COBPERU</h1>
+                </div>
+            </div>
 
-    <!-- Contenedor del dialog de sesión expirada -->
+            <div class="login-panel">
+                <img class="company-logo" src="imagenes/logo-cobperu.png" alt="Cobranzas Perú">
+                <div class="login-header">
+                    <div class="brand-mark">
+                        <i class="fa-solid fa-map-location-dot"></i>
+                    </div>
+                    <div>
+                        <h2>Iniciar sesión</h2>
+                    </div>
+                </div>
+
+                <form id="login-form" action="login.php" method="post" novalidate>
+                    <div class="form-group">
+                        <label for="usuario">Usuario</label>
+                        <div class="input-wrap">
+                            <i class="fa-solid fa-user input-icon"></i>
+                            <input type="text" id="usuario" name="usuario" placeholder="Ingresa tu usuario" autocomplete="username" required>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="contrasena">Contraseña</label>
+                        <div class="input-wrap">
+                            <i class="fa-solid fa-lock input-icon"></i>
+                            <input type="password" id="contrasena" name="contrasena" placeholder="Ingresa tu contraseña" autocomplete="current-password" required>
+                            <button type="button" class="toggle-password" id="togglePassword" aria-label="Mostrar contraseña">
+                                <i class="fa-solid fa-eye"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="error-message" class="alert-message" role="alert" aria-live="polite" hidden></div>
+
+                    <button type="submit" id="btnLogin" class="btn-login">
+                        <span class="btn-content">
+                            <i class="fa-solid fa-right-to-bracket"></i>
+                            <span>Ingresar</span>
+                        </span>
+                        <span class="btn-loader" aria-hidden="true">
+                            <span class="spinner-border spinner-border-sm" role="status"></span>
+                            Validando...
+                        </span>
+                    </button>
+                </form>
+            </div>
+        </section>
+    </main>
+
     <div class="modal fade" id="modalSesionCerrada" tabindex="-1" aria-labelledby="modalSesionCerradaLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content shadow-lg rounded-4" style="border: none; font-family: 'Montserrat', sans-serif;">
-
-                <!-- Encabezado elegante en gris oscuro -->
-                <div class="modal-header text-white" style="background-color: #343a40; border-top-left-radius: 1rem; border-top-right-radius: 1rem;">
+            <div class="modal-content session-modal">
+                <div class="modal-header">
                     <h5 class="modal-title" id="modalSesionCerradaLabel">
-                        <i class="fas fa-exclamation-triangle me-2"></i> Cambio de Sesión
+                        <i class="fa-solid fa-shield-halved me-2"></i> Sesión actualizada
                     </h5>
                 </div>
-
-                <!-- Cuerpo del modal -->
-                <div class="modal-body text-center text-secondary">
-                    <p class="fs-5 mb-3">
-                        Se cerró la sesión anterior. Ahora estás conectado en este dispositivo.
-                    </p>
-                    <i class="fas fa-user-shield fa-3x text-secondary mb-2"></i>
+                <div class="modal-body text-center">
+                    <div class="modal-icon"><i class="fa-solid fa-user-shield"></i></div>
+                    <p class="mb-0">Se cerró la sesión anterior. Ahora estás conectado en este dispositivo.</p>
                 </div>
-
-                <!-- Botón personalizado -->
                 <div class="modal-footer justify-content-center border-0">
                     <button type="button" class="btn btn-dark px-4 py-2 rounded-pill" id="continuarBtn">
-                        <i class="fas fa-check-circle me-2"></i> Continuar
+                        <i class="fa-solid fa-check-circle me-2"></i> Continuar
                     </button>
                 </div>
             </div>
         </div>
     </div>
 
-
-    <!-- Bootstrap 5 JS (incluye Popper) -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-
-
-    <!-- Login login -->
     <script src="login.js"></script>
 </body>
 

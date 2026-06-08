@@ -208,6 +208,13 @@ $_SESSION['id_mis_cuentas'] = $idUsuario;
             </div>
           </div>
 
+          <div class="px-4 py-3 border-b border-gray-100 bg-gray-50/60">
+            <div class="relative max-w-md">
+              <i data-lucide="search" class="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+              <input id="buscadorCuentas" type="search" autocomplete="off" placeholder="Buscar por cliente, documento, cuenta, dirección o distrito..." class="w-full h-10 rounded-xl bg-white border border-gray-200 pl-9 pr-3 text-xs outline-none focus:border-[#FF161A] focus:ring-4 focus:ring-red-50">
+            </div>
+          </div>
+
           <div class="overflow-x-auto scroll-suave">
             <table class="min-w-[980px] w-full text-xs">
               <thead class="bg-gray-50 text-gray-500">

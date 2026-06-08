@@ -201,6 +201,7 @@ function obtener_filtros(array $origen): array
         'producto' => limpiar_texto($origen['producto'] ?? ''),
         'estadoVisita' => limpiar_texto($origen['estadoVisita'] ?? ''),
         'rangoImporte' => limpiar_texto($origen['rangoImporte'] ?? ''),
+        'busqueda' => limpiar_texto($origen['busqueda'] ?? ''),
         'criterioRuta' => limpiar_texto($origen['criterioRuta'] ?? 'CERCANIA'),
     ];
 }
@@ -252,6 +253,29 @@ function construir_where_mis_cuentas(array $filtros, int $idAsesor, string &$typ
         $where[] = 'COALESCE(c.MONTOACOBRAR, 0) >= 1000 AND COALESCE(c.MONTOACOBRAR, 0) < 5000';
     } elseif ($filtros['rangoImporte'] === '5000+') {
         $where[] = 'COALESCE(c.MONTOACOBRAR, 0) >= 5000';
+    }
+
+    $busqueda = trim((string)($filtros['busqueda'] ?? ''));
+    if ($busqueda !== '') {
+        $where[] = "(
+            c.NOMBRE LIKE ?
+            OR c.NUMEROCUENTA LIKE ?
+            OR c.documento LIKE ?
+            OR c.identificador LIKE ?
+            OR c.PRODUCTO LIKE ?
+            OR d.DISTRITO LIKE ?
+            OR d.PROVINCIA LIKE ?
+            OR d.DEPARTAMENTO LIKE ?
+            OR d.DIRECCION_DEPURADA LIKE ?
+            OR d.DIRECCION LIKE ?
+            OR d.REF_DEPURADA LIKE ?
+            OR d.REF LIKE ?
+        )";
+        $like = '%' . $busqueda . '%';
+        $types .= 'ssssssssssss';
+        for ($i = 0; $i < 12; $i++) {
+            $params[] = $like;
+        }
     }
 
     return 'WHERE ' . implode(' AND ', $where);
