@@ -288,6 +288,8 @@ if (empty($_SESSION['id'])) {
                   <th class="px-3 py-3 text-left">Asesor Actual</th>
                   <th class="px-3 py-3 text-left">Estado</th>
                   <th class="px-3 py-3 text-left">Pago</th>
+                  <th class="px-3 py-3 text-left">Visitas Semana</th>
+                  <th class="px-3 py-3 text-left">Acción</th>
                 </tr>
               </thead>
 
@@ -358,7 +360,11 @@ if (empty($_SESSION['id'])) {
   </main>
 
 
-  <script src="asignarCuenta.js"></script>
+  <script>
+    window.initMap = window.initMap || function() {};
+  </script>
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCGFBIf_6mCinwpqWw2Q-lHwNmK6u2iMhE&libraries=places,marker&callback=initMap"></script>
+  <script src="asignarCuenta.js?v=20260622_supervisor_direccion_ruta_v1"></script>
 </body>
 
 </html>

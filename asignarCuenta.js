@@ -34,6 +34,13 @@ let seleccionGlobalCargando = false;
 let asesorPaginaActual = 1;
 let asesoresPorPagina = 5;
 
+let mapaDireccionSupervisor = null;
+let marcadorDireccionSupervisor = null;
+let geocoderDireccionSupervisor = null;
+let mapaRutaSupervisor = null;
+let marcadoresRutaSupervisor = [];
+let lineaRutaSupervisor = null;
+
 function escaparHTML(valor) {
   return String(valor ?? "")
     .replaceAll("&", "&amp;")
@@ -60,7 +67,7 @@ function asegurarModalConfirmacion() {
         </div>
         <button id="modalConfirmacionCerrar" type="button" class="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-500 cursor-pointer">
           <i data-lucide="x" class="w-4 h-4"></i>
-        </button>
+        </div>
       </div>
       <div id="modalConfirmacionContenido" class="px-5 py-4 max-h-[60vh] overflow-y-auto text-sm text-gray-700"></div>
       <div class="px-5 py-4 bg-gray-50 border-t border-gray-100 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
@@ -170,6 +177,57 @@ function formatoMoneda(valor) {
   }).format(Number(valor || 0));
 }
 
+function valorInput(selector) {
+  return String($(selector)?.value || "").trim();
+}
+
+function partesUnicas(partes) {
+  const vistos = new Set();
+  return partes
+    .map((parte) => String(parte || "").trim())
+    .filter((parte) => {
+      if (!parte) return false;
+      const key = parte.toUpperCase();
+      if (vistos.has(key)) return false;
+      vistos.add(key);
+      return true;
+    });
+}
+
+function extraerDistritoGoogle(resultado) {
+  const componente = resultado.address_components?.find((item) =>
+    item.types?.some((tipo) =>
+      [
+        "locality",
+        "administrative_area_level_3",
+        "sublocality",
+        "sublocality_level_1",
+      ].includes(tipo),
+    ),
+  );
+  return componente?.long_name || "";
+}
+
+function extraerUbigeoGoogle(resultado) {
+  const componentes = resultado.address_components || [];
+  const distrito = extraerDistritoGoogle(resultado);
+  const provincia =
+    componentes.find((item) =>
+      item.types?.includes("administrative_area_level_2"),
+    )?.long_name || "";
+  const departamento =
+    componentes.find((item) =>
+      item.types?.includes("administrative_area_level_1"),
+    )?.long_name || "";
+  return partesUnicas([departamento, provincia, distrito]).join(" / ");
+}
+
+function cuentaPorAsignacion(idAsignacion) {
+  return cuentas.find(
+    (cuenta) => Number(cuenta.id_asignacion) === Number(idAsignacion),
+  );
+}
+
 function construirQueryParams(params) {
   const query = new URLSearchParams();
 
@@ -222,6 +280,515 @@ async function apiPost(action, payload) {
   }
 
   return data;
+}
+
+function limpiarMapaDireccionSupervisor() {
+  const mapa = $("#mapaDireccionSupervisor");
+  const mensaje = $("#mensajeMapaDireccionSupervisor");
+  if (mapa) mapa.classList.add("hidden");
+  if (mensaje) {
+    mensaje.classList.add("hidden");
+    mensaje.textContent = "";
+  }
+  mapaDireccionSupervisor = null;
+  marcadorDireccionSupervisor = null;
+}
+
+function asegurarModalDireccionSupervisor() {
+  let modal = $("#modalDireccionSupervisor");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "modalDireccionSupervisor";
+  modal.className =
+    "hidden fixed inset-0 z-50 items-center justify-center bg-black/40 p-4";
+  modal.innerHTML = `
+    <div class="bg-white rounded-2xl shadow-2xl border border-gray-200 w-full max-w-2xl overflow-hidden">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <h3 class="font-bold text-sm">Actualizar dirección</h3>
+          <p class="text-[11px] text-gray-400 mt-1">La corrección quedará registrada con fuente SUPERVISOR.</p>
+        </div>
+        <button id="btnCerrarDireccionSupervisor" type="button" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div class="p-5 space-y-3 text-xs max-h-[72vh] overflow-y-auto">
+        <input type="hidden" id="direccionSupervisorAsignacionId">
+        <input type="hidden" id="latitudDireccionSupervisor">
+        <input type="hidden" id="longitudDireccionSupervisor">
+        <input type="hidden" id="distritoOriginalSupervisor">
+        <input type="hidden" id="ubigeoOriginalSupervisor">
+        <div class="rounded-xl border border-gray-100 bg-gray-50 p-3">
+          <div class="text-[11px] text-gray-400">Cuenta</div>
+          <div id="direccionSupervisorCuenta" class="font-semibold text-gray-700"></div>
+        </div>
+        <div>
+          <label class="text-gray-500">Dirección original</label>
+          <textarea id="direccionOriginalSupervisor" readonly class="mt-1 w-full min-h-16 rounded-xl border border-gray-200 bg-gray-50 p-3 outline-none"></textarea>
+          <p id="ubicacionOriginalSupervisor" class="mt-1 text-[11px] text-gray-400"></p>
+        </div>
+        <div>
+          <label class="text-gray-500">Dirección Search</label>
+          <textarea id="direccionSearchSupervisor" class="mt-1 w-full min-h-16 rounded-xl border border-gray-200 p-3 outline-none focus:border-[#FF161A] focus:ring-4 focus:ring-red-50" placeholder="Dirección obtenida desde Search"></textarea>
+        </div>
+        <div>
+          <label class="text-gray-500">Dirección corregida / sugerida por supervisor</label>
+          <textarea id="direccionCorregidaSupervisor" class="mt-1 w-full min-h-16 rounded-xl border border-gray-200 p-3 outline-none focus:border-[#FF161A] focus:ring-4 focus:ring-red-50" placeholder="Dirección corregida"></textarea>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="text-gray-500">Distrito corregido</label>
+            <input id="distritoCorregidoSupervisor" class="mt-1 w-full h-10 rounded-xl border border-gray-200 px-3 outline-none focus:border-[#FF161A] focus:ring-4 focus:ring-red-50">
+          </div>
+          <div>
+            <label class="text-gray-500">Ubigeo corregido</label>
+            <input id="ubigeoCorregidoSupervisor" class="mt-1 w-full h-10 rounded-xl border border-gray-200 px-3 outline-none focus:border-[#FF161A] focus:ring-4 focus:ring-red-50">
+          </div>
+        </div>
+        <button id="btnGeocodificarDireccionSupervisor" type="button" class="w-full h-10 rounded-xl border border-red-200 bg-red-50 hover:bg-red-100 text-[#8B0000] text-xs font-semibold">
+          Validar ubicación con Google Maps
+        </button>
+        <div id="mapaDireccionSupervisor" class="hidden h-64 rounded-xl border border-gray-200 overflow-hidden"></div>
+        <p id="mensajeMapaDireccionSupervisor" class="hidden text-[11px] text-gray-500"></p>
+      </div>
+      <div class="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-2">
+        <button id="btnCancelarDireccionSupervisor" type="button" class="px-4 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs">Cancelar</button>
+        <button id="btnGuardarDireccionSupervisor" type="button" class="px-4 py-2 rounded-xl bg-[#8B0000] hover:bg-[#A7191F] text-white text-xs font-semibold">Guardar dirección</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  $("#btnCerrarDireccionSupervisor").addEventListener(
+    "click",
+    cerrarModalDireccionSupervisor,
+  );
+  $("#btnCancelarDireccionSupervisor").addEventListener(
+    "click",
+    cerrarModalDireccionSupervisor,
+  );
+  $("#btnGuardarDireccionSupervisor").addEventListener(
+    "click",
+    guardarDireccionSupervisor,
+  );
+  $("#btnGeocodificarDireccionSupervisor").addEventListener(
+    "click",
+    geocodificarDireccionSupervisor,
+  );
+  lucide.createIcons();
+  return modal;
+}
+
+function abrirModalDireccionSupervisor(idAsignacion) {
+  const cuenta = cuentaPorAsignacion(idAsignacion);
+  if (!cuenta) return;
+  const modal = asegurarModalDireccionSupervisor();
+  const direccionOriginal =
+    cuenta.direccion ||
+    cuenta.direccion_original ||
+    cuenta.direccion_depurada ||
+    "";
+  const distritoOriginal = cuenta.distrito_original || cuenta.distrito || "";
+  const ubigeoOriginal = cuenta.ubigeo_original || cuenta.ubigeo || "";
+
+  $("#direccionSupervisorAsignacionId").value = idAsignacion;
+  $("#direccionSupervisorCuenta").textContent =
+    `${cuenta.cuenta || cuenta.id} - ${cuenta.cliente || "Cliente"}`;
+  $("#direccionOriginalSupervisor").value = direccionOriginal;
+  $("#direccionSearchSupervisor").value = cuenta.direccion_search || "";
+  $("#direccionCorregidaSupervisor").value = cuenta.direccion_corregida || "";
+  $("#distritoOriginalSupervisor").value = distritoOriginal;
+  $("#ubigeoOriginalSupervisor").value = ubigeoOriginal;
+  $("#distritoCorregidoSupervisor").value = cuenta.distrito_corregido || "";
+  $("#ubigeoCorregidoSupervisor").value = cuenta.ubigeo_corregido || "";
+  $("#latitudDireccionSupervisor").value = Number(cuenta.latitud || 0) || "";
+  $("#longitudDireccionSupervisor").value = Number(cuenta.longitud || 0) || "";
+  $("#ubicacionOriginalSupervisor").textContent = ubigeoOriginal
+    ? `Ubicación original: ${ubigeoOriginal}`
+    : "Ubicación original no registrada.";
+  limpiarMapaDireccionSupervisor();
+
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+
+  if (Number(cuenta.latitud || 0) && Number(cuenta.longitud || 0)) {
+    setTimeout(
+      () =>
+        mostrarMapaDireccionSupervisor(
+          Number(cuenta.latitud),
+          Number(cuenta.longitud),
+          false,
+        ),
+      80,
+    );
+  }
+  lucide.createIcons();
+}
+
+function cerrarModalDireccionSupervisor() {
+  const modal = $("#modalDireccionSupervisor");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+}
+
+function obtenerDireccionSupervisorParaGoogleMaps() {
+  const direccionBase =
+    valorInput("#direccionCorregidaSupervisor") ||
+    valorInput("#direccionSearchSupervisor") ||
+    valorInput("#direccionOriginalSupervisor");
+  const distritoBase =
+    valorInput("#distritoCorregidoSupervisor") ||
+    valorInput("#distritoOriginalSupervisor");
+  const ubigeoBase =
+    valorInput("#ubigeoCorregidoSupervisor") ||
+    valorInput("#ubigeoOriginalSupervisor");
+  return partesUnicas([direccionBase, distritoBase, ubigeoBase, "Perú"]).join(
+    ", ",
+  );
+}
+
+function aplicarResultadoGoogleSupervisor(
+  resultado,
+  sobrescribirSugerida = false,
+) {
+  const lat = resultado.geometry.location.lat();
+  const lng = resultado.geometry.location.lng();
+  const direccionGoogle = resultado.formatted_address || "";
+  const distritoGoogle = extraerDistritoGoogle(resultado);
+  const ubigeoGoogle = extraerUbigeoGoogle(resultado);
+
+  $("#latitudDireccionSupervisor").value = lat;
+  $("#longitudDireccionSupervisor").value = lng;
+  if (sobrescribirSugerida || !valorInput("#direccionCorregidaSupervisor")) {
+    $("#direccionCorregidaSupervisor").value = direccionGoogle;
+  }
+  if (!valorInput("#distritoCorregidoSupervisor") && distritoGoogle) {
+    $("#distritoCorregidoSupervisor").value = distritoGoogle;
+  }
+  if (!valorInput("#ubigeoCorregidoSupervisor") && ubigeoGoogle) {
+    $("#ubigeoCorregidoSupervisor").value = ubigeoGoogle;
+  }
+}
+
+function mostrarMapaDireccionSupervisor(lat, lng, permitirReverse = true) {
+  if (!window.google?.maps?.Map) return;
+  const contenedor = $("#mapaDireccionSupervisor");
+  const mensaje = $("#mensajeMapaDireccionSupervisor");
+  const posicion = { lat: Number(lat), lng: Number(lng) };
+  if (!Number.isFinite(posicion.lat) || !Number.isFinite(posicion.lng)) return;
+
+  contenedor.classList.remove("hidden");
+  mensaje.classList.remove("hidden");
+  mensaje.textContent =
+    "Puedes mover el marcador o hacer clic en el mapa para ajustar la ubicación.";
+
+  if (!mapaDireccionSupervisor) {
+    mapaDireccionSupervisor = new google.maps.Map(contenedor, {
+      center: posicion,
+      zoom: 16,
+      mapTypeControl: false,
+      streetViewControl: false,
+    });
+  } else {
+    mapaDireccionSupervisor.setCenter(posicion);
+    mapaDireccionSupervisor.setZoom(16);
+  }
+
+  if (!marcadorDireccionSupervisor) {
+    marcadorDireccionSupervisor = new google.maps.Marker({
+      map: mapaDireccionSupervisor,
+      position: posicion,
+      draggable: true,
+    });
+    marcadorDireccionSupervisor.addListener("dragend", () => {
+      const pos = marcadorDireccionSupervisor.getPosition();
+      $("#latitudDireccionSupervisor").value = pos.lat();
+      $("#longitudDireccionSupervisor").value = pos.lng();
+    });
+  } else {
+    marcadorDireccionSupervisor.setPosition(posicion);
+  }
+
+  mapaDireccionSupervisor.addListener("click", (event) => {
+    const pos = event.latLng;
+    marcadorDireccionSupervisor.setPosition(pos);
+    $("#latitudDireccionSupervisor").value = pos.lat();
+    $("#longitudDireccionSupervisor").value = pos.lng();
+    if (permitirReverse && window.google?.maps?.Geocoder) {
+      geocoderDireccionSupervisor =
+        geocoderDireccionSupervisor || new google.maps.Geocoder();
+      geocoderDireccionSupervisor.geocode(
+        { location: pos },
+        (results, status) => {
+          if (status === "OK" && results?.[0])
+            aplicarResultadoGoogleSupervisor(results[0], true);
+        },
+      );
+    }
+  });
+}
+
+function geocodificarDireccionSupervisor() {
+  const direccion = obtenerDireccionSupervisorParaGoogleMaps();
+  if (!direccion || !window.google?.maps?.Geocoder) {
+    mostrarModalAviso({
+      titulo: "Dirección incompleta",
+      mensaje: "Ingresa una dirección para validar en el mapa.",
+      icono: "map-pin",
+    });
+    return;
+  }
+  geocoderDireccionSupervisor =
+    geocoderDireccionSupervisor || new google.maps.Geocoder();
+  geocoderDireccionSupervisor.geocode(
+    { address: direccion },
+    (results, status) => {
+      if (status !== "OK" || !results?.[0]) {
+        mostrarModalAviso({
+          titulo: "No se encontró ubicación",
+          mensaje:
+            "Revisa la dirección o selecciona manualmente el punto en el mapa.",
+          icono: "circle-alert",
+          claseIcono: "border-orange-100 bg-orange-50 text-orange-700",
+        });
+        return;
+      }
+      aplicarResultadoGoogleSupervisor(results[0], true);
+      mostrarMapaDireccionSupervisor(
+        results[0].geometry.location.lat(),
+        results[0].geometry.location.lng(),
+        true,
+      );
+    },
+  );
+}
+
+async function guardarDireccionSupervisor() {
+  try {
+    const btn = $("#btnGuardarDireccionSupervisor");
+    btn.disabled = true;
+    btn.textContent = "Guardando...";
+    const idAsignacion = Number(
+      $("#direccionSupervisorAsignacionId").value || 0,
+    );
+    const data = await apiPost("guardar_direccion_supervisor", {
+      cartera: $("#filtroCartera").value,
+      id_asignacion: idAsignacion,
+      direccion_original: valorInput("#direccionOriginalSupervisor"),
+      direccion_search: valorInput("#direccionSearchSupervisor"),
+      direccion_corregida: valorInput("#direccionCorregidaSupervisor"),
+      distrito_original: valorInput("#distritoOriginalSupervisor"),
+      distrito_corregido: valorInput("#distritoCorregidoSupervisor"),
+      ubigeo_original: valorInput("#ubigeoOriginalSupervisor"),
+      ubigeo_corregido: valorInput("#ubigeoCorregidoSupervisor"),
+      latitud: valorInput("#latitudDireccionSupervisor"),
+      longitud: valorInput("#longitudDireccionSupervisor"),
+      fuente_correccion: "SUPERVISOR",
+    });
+
+    cerrarModalDireccionSupervisor();
+    mostrarToast(data.message || "Dirección actualizada correctamente.");
+    await cargarCuentas();
+  } catch (error) {
+    mostrarErrorAsignacion(error);
+  } finally {
+    const btn = $("#btnGuardarDireccionSupervisor");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Guardar dirección";
+    }
+  }
+}
+
+function limpiarMapaRutaSupervisor() {
+  marcadoresRutaSupervisor.forEach((m) => m.setMap(null));
+  marcadoresRutaSupervisor = [];
+  if (lineaRutaSupervisor) {
+    lineaRutaSupervisor.setMap(null);
+    lineaRutaSupervisor = null;
+  }
+}
+
+function asegurarModalRutaSupervisor() {
+  let modal = $("#modalRutaSupervisor");
+  if (modal) return modal;
+  modal = document.createElement("div");
+  modal.id = "modalRutaSupervisor";
+  modal.className = "hidden fixed inset-0 z-50 bg-slate-900/50 p-4";
+  modal.innerHTML = `
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-[1500px] h-[88vh] mx-auto overflow-hidden flex flex-col">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+          <h3 class="font-bold text-sm flex items-center gap-2"><i data-lucide="map" class="w-4 h-4 text-[#FF161A]"></i> Mapa de ruta del gestor</h3>
+          <p id="resumenRutaSupervisor" class="text-[11px] text-gray-400 mt-1">Vista de solo lectura para supervisión.</p>
+        </div>
+        <button id="btnCerrarRutaSupervisor" type="button" class="w-8 h-8 rounded-full hover:bg-gray-100 flex items-center justify-center"><i data-lucide="x" class="w-4 h-4"></i></button>
+      </div>
+      <div class="flex-1 grid grid-cols-1 xl:grid-cols-[360px_1fr] min-h-0">
+        <aside class="border-r border-gray-100 bg-white min-h-0 flex flex-col">
+          <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <div>
+              <p class="text-[11px] uppercase tracking-wider text-[#FF161A] font-bold">Hoja de ruta</p>
+              <p id="tituloListaRutaSupervisor" class="text-xs font-semibold text-gray-700">Secuencia de visitas</p>
+            </div>
+            <span id="badgeRutaSupervisor" class="text-[11px] bg-red-50 text-[#8B0000] px-2 py-1 rounded-full font-semibold">0 paradas</span>
+          </div>
+          <div id="listaRutaSupervisor" class="flex-1 overflow-y-auto p-3 space-y-2"></div>
+        </aside>
+        <section class="relative min-h-0 bg-slate-100">
+          <div class="absolute top-3 left-3 right-3 z-10 bg-white/95 backdrop-blur border border-gray-200 rounded-2xl shadow-sm px-4 py-3 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2 text-xs font-semibold text-gray-700"><i data-lucide="navigation" class="w-4 h-4 text-[#FF161A]"></i><span>Mapa</span></div>
+            <span class="text-[11px] text-gray-500">Recorrido referencial según orden de visita</span>
+          </div>
+          <div id="mapaRutaSupervisor" class="w-full h-full min-h-[520px]"></div>
+          <div id="mensajeRutaSupervisor" class="absolute bottom-4 left-4 right-4 z-10 hidden rounded-2xl bg-white/95 border border-orange-100 shadow-sm px-4 py-3 text-xs text-orange-600"></div>
+        </section>
+      </div>
+      <div class="px-5 py-4 bg-gray-50 border-t border-gray-100 flex justify-end">
+        <button id="btnCerrarRutaSupervisorFooter" type="button" class="px-4 py-2 rounded-xl border border-gray-200 bg-white hover:bg-gray-50 text-xs">Cerrar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  $("#btnCerrarRutaSupervisor").addEventListener(
+    "click",
+    cerrarModalRutaSupervisor,
+  );
+  $("#btnCerrarRutaSupervisorFooter").addEventListener(
+    "click",
+    cerrarModalRutaSupervisor,
+  );
+  lucide.createIcons();
+  return modal;
+}
+
+function cerrarModalRutaSupervisor() {
+  const modal = $("#modalRutaSupervisor");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+}
+
+function renderRutaSupervisor(data, asesor) {
+  const cuentasRuta = data.cuentas || [];
+  $("#resumenRutaSupervisor").textContent = data.existe
+    ? `${asesor?.nombre || "Gestor"} | Semana ${data.semana?.fecha_inicio_semana || ""} al ${data.semana?.fecha_fin_semana || ""}`
+    : `${asesor?.nombre || "Gestor"} no tiene ruta activa en la semana seleccionada.`;
+  $("#tituloListaRutaSupervisor").textContent =
+    data.ruta?.nombre_ruta || "Secuencia de visitas";
+  $("#badgeRutaSupervisor").textContent =
+    `${cuentasRuta.length} parada${cuentasRuta.length === 1 ? "" : "s"}`;
+
+  if (!cuentasRuta.length) {
+    $("#listaRutaSupervisor").innerHTML =
+      `<div class="text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl p-4 text-center">No hay cuentas en la ruta semanal del gestor.</div>`;
+  } else {
+    $("#listaRutaSupervisor").innerHTML = cuentasRuta
+      .map(
+        (cuenta, index) => `
+      <div class="rounded-xl border border-gray-100 bg-white p-3">
+        <div class="flex items-start gap-2">
+          <span class="w-6 h-6 rounded-full bg-[#8B0000] text-white text-[11px] font-bold flex items-center justify-center">${cuenta.orden_visita || index + 1}</span>
+          <div class="min-w-0 flex-1">
+            <strong class="block text-xs text-gray-800">${escaparHTML(cuenta.cliente || "Cliente")}</strong>
+            <span class="block text-[10px] text-gray-400">${escaparHTML(cuenta.cuenta || "")}</span>
+            <p class="mt-1 text-[11px] text-gray-500 leading-4">${escaparHTML(cuenta.direccion_sugerida || cuenta.direccion_original || "Sin dirección")}</p>
+            <span class="inline-flex mt-2 text-[10px] px-2 py-0.5 rounded-full ${cuenta.coord_status === "VALIDA" ? "bg-emerald-50 text-emerald-700" : "bg-orange-50 text-orange-700"}">${cuenta.coord_status === "VALIDA" ? "Con coordenadas" : "Sin coordenadas"}</span>
+          </div>
+        </div>
+      </div>
+    `,
+      )
+      .join("");
+  }
+
+  renderMapaRutaSupervisor(cuentasRuta);
+  lucide.createIcons();
+}
+
+function renderMapaRutaSupervisor(cuentasRuta) {
+  if (!window.google?.maps?.Map) return;
+  const contenedor = $("#mapaRutaSupervisor");
+  const mensaje = $("#mensajeRutaSupervisor");
+  if (!mapaRutaSupervisor) {
+    mapaRutaSupervisor = new google.maps.Map(contenedor, {
+      center: { lat: -12.0464, lng: -77.0428 },
+      zoom: 11,
+      mapTypeControl: false,
+      streetViewControl: false,
+      fullscreenControl: true,
+    });
+  }
+  limpiarMapaRutaSupervisor();
+  const cuentasConCoords = cuentasRuta.filter(
+    (cuenta) => Number(cuenta.latitud || 0) && Number(cuenta.longitud || 0),
+  );
+  const sinCoords = cuentasRuta.length - cuentasConCoords.length;
+  if (sinCoords > 0) {
+    mensaje.classList.remove("hidden");
+    mensaje.textContent = `${sinCoords} parada(s) todavía no tienen coordenadas registradas.`;
+  } else {
+    mensaje.classList.add("hidden");
+    mensaje.textContent = "";
+  }
+  if (!cuentasConCoords.length) {
+    mapaRutaSupervisor.setCenter({ lat: -12.0464, lng: -77.0428 });
+    mapaRutaSupervisor.setZoom(11);
+    return;
+  }
+  const bounds = new google.maps.LatLngBounds();
+  const path = [];
+  cuentasConCoords.forEach((cuenta, index) => {
+    const posicion = {
+      lat: Number(cuenta.latitud),
+      lng: Number(cuenta.longitud),
+    };
+    path.push(posicion);
+    bounds.extend(posicion);
+    const marker = new google.maps.Marker({
+      map: mapaRutaSupervisor,
+      position: posicion,
+      label: String(cuenta.orden_visita || index + 1),
+      title: cuenta.cliente || cuenta.cuenta || "Parada",
+    });
+    marcadoresRutaSupervisor.push(marker);
+  });
+  if (path.length >= 2) {
+    lineaRutaSupervisor = new google.maps.Polyline({
+      map: mapaRutaSupervisor,
+      path,
+      strokeColor: "#8B0000",
+      strokeOpacity: 0.85,
+      strokeWeight: 4,
+    });
+  }
+  if (path.length === 1) {
+    mapaRutaSupervisor.setCenter(path[0]);
+    mapaRutaSupervisor.setZoom(16);
+  } else {
+    mapaRutaSupervisor.fitBounds(bounds, 70);
+  }
+}
+
+async function abrirMapaRutaAsesor(asesorId) {
+  const asesor = obtenerAsesor(Number(asesorId));
+  try {
+    const modal = asegurarModalRutaSupervisor();
+    modal.classList.remove("hidden");
+    modal.classList.add("flex");
+    $("#listaRutaSupervisor").innerHTML =
+      `<div class="text-xs text-gray-400 border border-dashed border-gray-200 rounded-xl p-4 text-center">Cargando ruta...</div>`;
+    const data = await apiGet("ruta_asesor", {
+      asesorId,
+      cartera: $("#filtroCartera").value,
+      fechaReferencia: new Date().toISOString().slice(0, 10),
+    });
+    setTimeout(() => renderRutaSupervisor(data, asesor), 80);
+  } catch (error) {
+    mostrarErrorAsignacion(error);
+  }
 }
 
 function obtenerAsesor(id) {
@@ -370,7 +937,7 @@ function renderCuentas() {
   if (cuentas.length === 0) {
     $("#tablaCuentas").innerHTML = `
       <tr>
-        <td colspan="9" class="px-4 py-8 text-center text-gray-400">
+        <td colspan="11" class="px-4 py-8 text-center text-gray-400">
           No se encontraron cuentas con los filtros seleccionados.
         </td>
       </tr>
@@ -386,6 +953,17 @@ function renderCuentas() {
       const pagoTitulo = tienePago
         ? `Fecha: ${cuenta.fecha_pago || "-"} | Monto: ${formatoMoneda(cuenta.monto_pago || 0)}`
         : "Sin pago registrado en el periodo";
+      const visitasSemana = Number(cuenta.visitas_semana || 0);
+      const visitasTitulo =
+        visitasSemana > 0
+          ? `Última visita: ${cuenta.ultima_fecha_visita_semana || "-"}`
+          : "Sin visitas registradas esta semana";
+      const direccionVisible =
+        cuenta.direccion_sugerida ||
+        cuenta.direccion_depurada ||
+        cuenta.direccion ||
+        "";
+      const puedeEditarDireccion = Number(cuenta.id_asignacion || 0) > 0;
 
       return `
         <tr class="${seleccionada ? "bg-blue-50/60" : "bg-white"} hover:bg-blue-50/40">
@@ -406,7 +984,10 @@ function renderCuentas() {
             <span class="block text-[10px] text-gray-400">${escaparHTML(cuenta.segmento)}</span>
           </td>
 
-          <td class="px-3 py-3 text-gray-500">${cuenta.direccion_depurada ? escaparHTML(cuenta.direccion_depurada) : ""}</td>
+          <td class="px-3 py-3 text-gray-500 max-w-[260px]">
+            <span class="block leading-4">${escaparHTML(direccionVisible)}</span>
+            ${cuenta.direccion_corregida || cuenta.direccion_search ? `<span class="inline-flex mt-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">Dirección corregida</span>` : ""}
+          </td>
 
           <td class="px-3 py-3">
             <strong>${escaparHTML(cuenta.distrito)}</strong>
@@ -430,10 +1011,31 @@ function renderCuentas() {
               ${tienePago ? "Pago" : "No pago"}
             </span>
           </td>
+
+          <td class="px-3 py-3">
+            <span title="${escaparHTML(visitasTitulo)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${visitasSemana > 0 ? "bg-blue-50 border-blue-100 text-blue-700" : "bg-gray-50 border-gray-100 text-gray-500"}">
+              <i data-lucide="footprints" class="w-3 h-3"></i>
+              ${visitasSemana}
+            </span>
+          </td>
+
+          <td class="px-3 py-3">
+            <button type="button" class="btnDireccionSupervisor inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-[11px] disabled:opacity-40 disabled:cursor-not-allowed" data-id-asignacion="${cuenta.id_asignacion || ""}" ${puedeEditarDireccion ? "" : "disabled"} title="${puedeEditarDireccion ? "Actualizar dirección" : "Primero debe existir una asignación activa"}">
+              <i data-lucide="map-pin" class="w-3 h-3"></i>
+              Dirección
+            </button>
+          </td>
         </tr>
       `;
     })
     .join("");
+
+  document.querySelectorAll(".btnDireccionSupervisor").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idAsignacion = Number(btn.dataset.idAsignacion || 0);
+      if (idAsignacion > 0) abrirModalDireccionSupervisor(idAsignacion);
+    });
+  });
 
   document.querySelectorAll(".checkCuenta").forEach((check) => {
     check.addEventListener("change", () => {
@@ -484,10 +1086,12 @@ function renderAsesores() {
       const iniciales = obtenerIniciales(asesor.nombre);
 
       return `
-        <button 
+        <div 
           data-id="${asesor.id}"
-          ${asignando ? "disabled" : ""}
-          class="asesorItem w-full rounded-xl p-3 flex items-center gap-3 text-left transition disabled:opacity-50
+          role="button"
+          tabindex="0"
+          aria-disabled="${asignando ? "true" : "false"}"
+          class="asesorItem w-full rounded-xl p-3 flex items-center gap-3 text-left transition ${asignando ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}
             ${seleccionado ? "border border-blue-500 bg-blue-50" : "border border-gray-100 hover:border-blue-300 bg-white"}"
         >
           <div class="relative shrink-0">
@@ -543,6 +1147,16 @@ function renderAsesores() {
                 `
                     : ""
                 }
+                ${
+                  Number(asesor.ruta_semana ?? asesor.ruta_hoy ?? 0) > 0
+                    ? `
+                  <button type="button" class="btnVerRutaAsesor mt-1 inline-flex items-center gap-1.5 rounded-lg border border-blue-200 bg-white px-2 py-1 text-blue-700 hover:bg-blue-50" data-id="${asesor.id}">
+                    <i data-lucide="map" class="w-3.5 h-3.5"></i>
+                    Ver mapa de ruta
+                  </button>
+                `
+                    : ""
+                }
               </div>
             `
                 : ""
@@ -552,13 +1166,28 @@ function renderAsesores() {
           <span class="shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${seleccionado ? "bg-blue-500 text-white" : "border border-gray-200 text-gray-400"}">
             <i data-lucide="${seleccionado ? "check" : "chevron-right"}" class="w-4 h-4"></i>
           </span>
-        </button>
+        </div>
       `;
     })
     .join("");
 
+  document.querySelectorAll(".btnVerRutaAsesor").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      abrirMapaRutaAsesor(Number(btn.dataset.id));
+    });
+  });
+
   document.querySelectorAll(".asesorItem").forEach((item) => {
-    item.addEventListener("click", () => {
+    item.addEventListener("click", (event) => {
+      if (asignando || event.target.closest(".btnVerRutaAsesor")) return;
+      asesorSeleccionadoId = Number(item.dataset.id);
+      render();
+    });
+    item.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      if (asignando) return;
       asesorSeleccionadoId = Number(item.dataset.id);
       render();
     });
@@ -888,7 +1517,7 @@ async function cargarCuentas() {
     cargandoCuentas = false;
     $("#tablaCuentas").innerHTML = `
       <tr>
-        <td colspan="9" class="px-4 py-8 text-center text-red-500">
+        <td colspan="11" class="px-4 py-8 text-center text-red-500">
           ${escaparHTML(error.message)}
         </td>
       </tr>
@@ -978,7 +1607,7 @@ async function cargarDatosIniciales() {
     setControlesDisabled(false);
     $("#tablaCuentas").innerHTML = `
       <tr>
-        <td colspan="9" class="px-4 py-8 text-center text-red-500">
+        <td colspan="11" class="px-4 py-8 text-center text-red-500">
           ${escaparHTML(error.message)}
         </td>
       </tr>
@@ -1305,6 +1934,7 @@ $("#btnLimpiarFiltros").addEventListener("click", () => {
   $("#filtroDistrito").value = "";
   $("#filtroSegmento").value = "";
   $("#filtroEstado").value = "";
+  if ($("#filtroPago")) $("#filtroPago").value = "";
   $("#busquedaGlobal").value = "";
 
   cuentasSeleccionadas = [];

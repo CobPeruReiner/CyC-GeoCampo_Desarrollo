@@ -323,6 +323,49 @@ function nombre_tabla_sql(array $ctx): string
     return "`{$tabla}`";
 }
 
+function fuente_direcciones_campo(array $ctx): string
+{
+    $idTable = (int)($ctx['id_table'] ?? 0);
+    $tabla = strtoupper(limpiar_texto($ctx['tabla'] ?? ''));
+    $cartera = strtoupper(limpiar_texto($ctx['cartera'] ?? ''));
+
+    // F CONFIANZA CAMPO trabaja con FUENTE 10.
+    if ($idTable === 1893 || strpos($tabla, 'CONFIANZA') !== false || strpos($cartera, 'CONFIANZA') !== false) {
+        return '10';
+    }
+
+    // FINANCIERA EFECTIVA CAMPO trabaja con FUENTE 11.
+    return '11';
+}
+
+function subquery_direcciones_campo(string $fuente, string $columnas = 'DOC, DEPARTAMENTO, PROVINCIA, DISTRITO, DIRECCION_DEPURADA, DIRECCION, REF_DEPURADA, REF'): string
+{
+    $fuente = preg_replace('/[^0-9]/', '', $fuente);
+    if ($fuente === '') {
+        $fuente = '11';
+    }
+
+    return "
+            SELECT {$columnas}
+            FROM (
+                SELECT
+                    d.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY d.DOC
+                        ORDER BY d.FECHA_ACTUALIZACION DESC
+                    ) AS rn
+                FROM direcciones d
+                WHERE d.DOC IS NOT NULL
+                  AND d.DOC <> ''
+                  AND d.FUENTE = '{$fuente}'
+                  AND COALESCE(d.IDESTADO, 1) = 1
+                  AND d.FECHA_ACTUALIZACION >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+                  AND d.FECHA_ACTUALIZACION < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
+            ) x
+            WHERE x.rn = 1
+    ";
+}
+
 
 function obtener_periodo_pago_actual(mysqli $mysqli): array
 {
@@ -416,6 +459,109 @@ function pago_monto_expr(mysqli $mysqli, array $ctx, array $periodo): string
     )";
 }
 
+
+function fecha_hoy_peru(): string
+{
+    return date('Y-m-d');
+}
+
+function validar_fecha_ruta(string $fechaRuta): string
+{
+    $fechaRuta = limpiar_texto($fechaRuta) ?: fecha_hoy_peru();
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $fechaRuta)) {
+        throw new Exception('Fecha de ruta inválida.');
+    }
+    return $fechaRuta;
+}
+
+function obtener_rango_semana(string $fechaReferencia): array
+{
+    $fechaReferencia = validar_fecha_ruta($fechaReferencia);
+    $dt = new DateTime($fechaReferencia);
+    $inicio = clone $dt;
+    $inicio->modify('monday this week');
+    $fin = clone $inicio;
+    $fin->modify('+6 days');
+
+    return [
+        'fecha_referencia' => $dt->format('Y-m-d'),
+        'fecha_inicio_semana' => $inicio->format('Y-m-d'),
+        'fecha_fin_semana' => $fin->format('Y-m-d'),
+    ];
+}
+
+function validar_asignacion_supervisor(mysqli $mysqli, int $idAsignacion, array $ctx): array
+{
+    $idTable = (int)($ctx['id_table'] ?? 0);
+    $idCartera = (int)($ctx['id_cartera'] ?? 0);
+
+    if ($idAsignacion <= 0 || $idTable <= 0 || $idCartera <= 0) {
+        throw new Exception('Datos de asignación inválidos.');
+    }
+
+    $rows = query_all($mysqli, "
+        SELECT id_asignacion, id_cuenta_campo, id_table, id_cartera, id_asesor
+        FROM geocampo_asignacion
+        WHERE id_asignacion = ?
+          AND id_table = ?
+          AND id_cartera = ?
+          AND activo = 1
+        LIMIT 1
+    ", 'iii', [$idAsignacion, $idTable, $idCartera]);
+
+    if (!$rows) {
+        throw new Exception('La cuenta no pertenece a la cartera seleccionada o ya no está activa.');
+    }
+
+    return $rows[0];
+}
+
+function normalizar_cuenta_ruta_supervisor(array $row): array
+{
+    $direccionDepurada = limpiar_texto($row['direccion_depurada'] ?? '');
+    $direccionOriginalBase = limpiar_texto($row['direccion_original_base'] ?? '');
+    $referenciaDepurada = limpiar_texto($row['referencia_depurada'] ?? '');
+    $referenciaOriginal = limpiar_texto($row['referencia_original'] ?? '');
+    $direccionSearch = limpiar_texto($row['direccion_search'] ?? '');
+    $direccionCorregida = limpiar_texto($row['direccion_corregida'] ?? '');
+    $distritoDir = limpiar_texto($row['distrito_dir'] ?? '');
+    $provinciaDir = limpiar_texto($row['provincia_dir'] ?? '');
+    $departamentoDir = limpiar_texto($row['departamento_dir'] ?? '');
+
+    $partesDireccion = array_filter([
+        $direccionDepurada ?: $direccionOriginalBase,
+        $referenciaDepurada ?: $referenciaOriginal,
+    ]);
+    if (!$partesDireccion) {
+        $partesDireccion = array_filter([$departamentoDir, $provinciaDir, $distritoDir]);
+    }
+
+    $direccionOriginal = $partesDireccion ? implode(' / ', $partesDireccion) : 'Sin dirección registrada';
+    $direccionSugerida = $direccionCorregida !== '' ? $direccionCorregida : ($direccionSearch !== '' ? $direccionSearch : $direccionOriginal);
+    $latitud = (float)($row['latitud'] ?? 0);
+    $longitud = (float)($row['longitud'] ?? 0);
+
+    return [
+        'id_asignacion' => (int)$row['id_asignacion'],
+        'orden_visita' => $row['orden_visita'] !== null ? (int)$row['orden_visita'] : null,
+        'cuenta' => limpiar_texto($row['cuenta']) ?: (string)($row['id_cuenta_campo'] ?? ''),
+        'cliente' => limpiar_texto($row['cliente']),
+        'producto' => limpiar_texto($row['producto']) ?: 'Sin producto',
+        'distrito' => $distritoDir ?: limpiar_texto($row['distrito']) ?: 'Sin distrito',
+        'ubigeo' => implode(' / ', array_filter([$departamentoDir, $provinciaDir, $distritoDir])) ?: 'Sin ubigeo',
+        'direccion_original' => $direccionOriginal,
+        'direccion_search' => $direccionSearch,
+        'direccion_corregida' => $direccionCorregida,
+        'direccion_sugerida' => $direccionSugerida,
+        'latitud' => $latitud,
+        'longitud' => $longitud,
+        'coord_status' => ($latitud !== 0.0 && $longitud !== 0.0) ? 'VALIDA' : 'POR_VALIDAR',
+        'estado_visita_codigo' => limpiar_texto($row['estado_visita_codigo'] ?? '') ?: 'AGENDADO',
+        'estado_visita' => limpiar_texto($row['estado_visita'] ?? '') ?: 'Agendado',
+        'fecha_agendada' => limpiar_texto($row['fecha_agendada'] ?? ''),
+    ];
+}
+
 function construir_where_cuentas(mysqli $mysqli, array $filtros, string &$types, array &$params, array $ctx): string
 {
     $where = ["c.id IS NOT NULL"];
@@ -506,11 +652,18 @@ function normalizar_cuentas(array $cuentas): array
         $cuenta['tiene_pago'] = (int)($cuenta['tiene_pago'] ?? 0);
         $cuenta['monto_pago'] = (float)($cuenta['monto_pago'] ?? 0);
         $cuenta['estado_pago'] = $cuenta['tiene_pago'] === 1 ? 'Pago' : 'No pago';
+        $cuenta['visitas_semana'] = (int)($cuenta['visitas_semana'] ?? 0);
+        $cuenta['ultima_fecha_visita_semana'] = limpiar_texto($cuenta['ultima_fecha_visita_semana'] ?? '');
+        $cuenta['latitud'] = (float)($cuenta['latitud'] ?? 0);
+        $cuenta['longitud'] = (float)($cuenta['longitud'] ?? 0);
+        $cuenta['coord_status'] = ($cuenta['latitud'] !== 0.0 && $cuenta['longitud'] !== 0.0) ? 'VALIDA' : 'POR_VALIDAR';
 
         $direccionDepurada = limpiar_texto($cuenta['direccion_depurada'] ?? '');
         $direccionOriginal = limpiar_texto($cuenta['direccion_original'] ?? '');
         $referenciaDepurada = limpiar_texto($cuenta['referencia_depurada'] ?? '');
         $referenciaOriginal = limpiar_texto($cuenta['referencia_original'] ?? '');
+        $direccionSearch = limpiar_texto($cuenta['direccion_search'] ?? '');
+        $direccionCorregida = limpiar_texto($cuenta['direccion_corregida'] ?? '');
 
         $partesDireccion = array_filter([
             $direccionDepurada ?: $direccionOriginal,
@@ -530,7 +683,9 @@ function normalizar_cuentas(array $cuentas): array
         $distritoDir = limpiar_texto($cuenta['distrito_dir'] ?? '');
         $ubigeoDir = implode(' / ', array_filter([$departamentoDir, $provinciaDir, $distritoDir]));
 
-        $cuenta['direccion'] = $partesDireccion ? implode(' / ', $partesDireccion) : 'Sin dirección registrada';
+        $direccionBase = $partesDireccion ? implode(' / ', $partesDireccion) : 'Sin dirección registrada';
+        $cuenta['direccion'] = $direccionBase;
+        $cuenta['direccion_sugerida'] = $direccionCorregida !== '' ? $direccionCorregida : ($direccionSearch !== '' ? $direccionSearch : $direccionBase);
         $cuenta['departamento'] = $departamentoDir;
         $cuenta['provincia'] = $provinciaDir;
         $cuenta['distrito'] = $distritoDir ?: 'Sin distrito';
@@ -562,6 +717,11 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
     $pagoExpr = pago_exists_expr($mysqli, $ctx, $periodoPago);
     $pagoFechaExpr = pago_fecha_expr($mysqli, $ctx, $periodoPago);
     $pagoMontoExpr = pago_monto_expr($mysqli, $ctx, $periodoPago);
+    $fuenteDirecciones = fuente_direcciones_campo($ctx);
+    $direccionesSql = subquery_direcciones_campo($fuenteDirecciones);
+    $semanaActual = obtener_rango_semana(fecha_hoy_peru());
+    $inicioSemana = $mysqli->real_escape_string($semanaActual['fecha_inicio_semana']);
+    $finSemana = $mysqli->real_escape_string($semanaActual['fecha_fin_semana']);
 
     $from = "
         FROM {$tablaCuentas} c
@@ -577,21 +737,28 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
         LEFT JOIN geocampo_estado_asignacion ea
             ON ea.id_estado_asignacion = ga.id_estado_asignacion
         LEFT JOIN (
-            SELECT DISTINCT
-                DOC,
-                DEPARTAMENTO,
-                PROVINCIA,
-                DISTRITO,
-                DIRECCION_DEPURADA,
-                DIRECCION,
-                REF_DEPURADA,
-                REF
-            FROM direcciones
-            WHERE DOC IS NOT NULL
-            AND DOC <> ''
-            AND FUENTE = '11'
+            {$direccionesSql}
         ) d
             ON d.DOC = c.documento
+        LEFT JOIN geocampo_direccion_corregida dc
+            ON dc.id_direccion_corregida = (
+                SELECT dc2.id_direccion_corregida
+                FROM geocampo_direccion_corregida dc2
+                WHERE dc2.id_asignacion = ga.id_asignacion
+                ORDER BY dc2.id_direccion_corregida DESC
+                LIMIT 1
+            )
+        LEFT JOIN (
+            SELECT
+                g.IDENTIFICADOR,
+                COUNT(*) AS cantidad_visitas_semana,
+                MAX(g.FECHA) AS ultima_fecha_visita_semana
+            FROM GEOCAMPO g
+            WHERE g.IDCARTERA = {$idCarteraCtx}
+              AND DATE(g.FECHA) BETWEEN '{$inicioSemana}' AND '{$finSemana}'
+            GROUP BY g.IDENTIFICADOR
+        ) vgs
+            ON vgs.IDENTIFICADOR = c.identificador
     ";
 
     $totalRows = query_all($mysqli, "SELECT COUNT(*) AS total {$from} {$where}", $types, $params);
@@ -620,6 +787,14 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             d.DEPARTAMENTO AS departamento_dir,
             d.PROVINCIA AS provincia_dir,
             d.DISTRITO AS distrito_dir,
+            dc.direccion_search,
+            dc.direccion_corregida,
+            dc.distrito_original,
+            dc.distrito_corregido,
+            dc.ubigeo_original,
+            dc.ubigeo_corregido,
+            dc.latitud,
+            dc.longitud,
             c.MONTOACOBRAR AS importe,
             {$carteraExpr} AS id_cartera,
             COALESCE(car.cartera, CAST({$carteraExpr} AS CHAR)) AS cartera,
@@ -627,6 +802,8 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             CASE WHEN {$pagoExpr} THEN 1 ELSE 0 END AS tiene_pago,
             {$pagoFechaExpr} AS fecha_pago,
             {$pagoMontoExpr} AS monto_pago,
+            COALESCE(vgs.cantidad_visitas_semana, 0) AS visitas_semana,
+            vgs.ultima_fecha_visita_semana,
             ga.id_asignacion,
             ga.id_asesor AS asesorId,
             ea.codigo AS estadoCodigo,
@@ -760,22 +937,18 @@ function cargar_filtros(mysqli $mysqli, array $ctx): array
 {
     $tablaCuentas = nombre_tabla_sql($ctx);
     $tablasCampo = obtener_tablas_campo_disponibles($mysqli);
+    $fuenteDirecciones = fuente_direcciones_campo($ctx);
+    $direccionesDistritoSql = subquery_direcciones_campo($fuenteDirecciones, 'DOC, DISTRITO');
 
     $distritos = query_all($mysqli, "
         SELECT DISTINCT d.DISTRITO AS valor
         FROM {$tablaCuentas} c
         INNER JOIN (
-            SELECT DISTINCT
-                DOC,
-                DISTRITO
-            FROM direcciones
-            WHERE DOC IS NOT NULL
-            AND DOC <> ''
-            AND FUENTE = '11'
-            AND DISTRITO IS NOT NULL
-            AND TRIM(DISTRITO) <> ''
+            {$direccionesDistritoSql}
         ) d
             ON d.DOC = c.documento
+        WHERE d.DISTRITO IS NOT NULL
+          AND TRIM(d.DISTRITO) <> ''
         ORDER BY d.DISTRITO
     ");
 
@@ -848,6 +1021,8 @@ function obtener_ids_por_filtros(mysqli $mysqli, array $filtros, array $ctx): ar
     $params = [];
     $where = construir_where_cuentas($mysqli, $filtros, $types, $params, $ctx);
     $carteraExpr = columna_cartera_cuenta_expr($mysqli, $ctx);
+    $fuenteDirecciones = fuente_direcciones_campo($ctx);
+    $direccionesSql = subquery_direcciones_campo($fuenteDirecciones);
 
     $sql = "
         SELECT c.id
@@ -864,19 +1039,7 @@ function obtener_ids_por_filtros(mysqli $mysqli, array $filtros, array $ctx): ar
         LEFT JOIN geocampo_estado_asignacion ea
             ON ea.id_estado_asignacion = ga.id_estado_asignacion
         LEFT JOIN (
-            SELECT DISTINCT
-                DOC,
-                DEPARTAMENTO,
-                PROVINCIA,
-                DISTRITO,
-                DIRECCION_DEPURADA,
-                DIRECCION,
-                REF_DEPURADA,
-                REF
-            FROM direcciones
-            WHERE DOC IS NOT NULL
-            AND DOC <> ''
-            AND FUENTE = '11'
+            {$direccionesSql}
         ) d
             ON d.DOC = c.documento
         {$where}
@@ -885,6 +1048,234 @@ function obtener_ids_por_filtros(mysqli $mysqli, array $filtros, array $ctx): ar
 
     $rows = query_all($mysqli, $sql, $types, $params);
     return array_values(array_unique(array_map(fn($row) => (int)$row['id'], $rows)));
+}
+
+
+function guardar_direccion_supervisor(mysqli $mysqli): void
+{
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        responder_json(['ok' => false, 'message' => 'JSON inválido.'], 400);
+    }
+
+    $idSupervisor = (int)($_SESSION['id'] ?? 0);
+    $idAsignacion = (int)($input['id_asignacion'] ?? 0);
+    $ctx = obtener_contexto_cartera($mysqli, $input['cartera'] ?? '');
+
+    $direccionOriginal = limpiar_texto($input['direccion_original'] ?? '');
+    $direccionSearch = limpiar_texto($input['direccion_search'] ?? '');
+    $direccionCorregida = limpiar_texto($input['direccion_corregida'] ?? '');
+    $distritoOriginal = limpiar_texto($input['distrito_original'] ?? '');
+    $distritoCorregido = limpiar_texto($input['distrito_corregido'] ?? '');
+    $ubigeoOriginal = limpiar_texto($input['ubigeo_original'] ?? '');
+    $ubigeoCorregido = limpiar_texto($input['ubigeo_corregido'] ?? '');
+    $latitud = isset($input['latitud']) && $input['latitud'] !== '' ? (float)$input['latitud'] : null;
+    $longitud = isset($input['longitud']) && $input['longitud'] !== '' ? (float)$input['longitud'] : null;
+
+    if ($idSupervisor <= 0 || $idAsignacion <= 0) {
+        responder_json(['ok' => false, 'message' => 'Datos inválidos para registrar dirección.'], 400);
+    }
+
+    if ($direccionSearch === '' && $direccionCorregida === '') {
+        responder_json(['ok' => false, 'message' => 'Debe ingresar una dirección search o corregida.'], 400);
+    }
+
+    try {
+        validar_asignacion_supervisor($mysqli, $idAsignacion, $ctx);
+        $idFuente = obtener_id_catalogo($mysqli, 'geocampo_fuente_correccion_direccion', 'id_fuente_correccion', 'SUPERVISOR');
+        $validado = ($latitud !== null && $longitud !== null) ? 1 : 0;
+
+        $stmt = $mysqli->prepare("        
+            INSERT INTO geocampo_direccion_corregida (
+                id_asignacion,
+                direccion_original,
+                direccion_search,
+                direccion_corregida,
+                distrito_original,
+                distrito_corregido,
+                ubigeo_original,
+                ubigeo_corregido,
+                latitud,
+                longitud,
+                id_fuente_correccion,
+                validado,
+                id_usuario_registro,
+                fecha_registro,
+                fecha_validacion
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), CASE WHEN ? = 1 THEN NOW() ELSE NULL END)
+        ");
+        if (!$stmt) {
+            throw new Exception('Error preparando dirección: ' . $mysqli->error);
+        }
+
+        $stmt->bind_param(
+            'isssssssddiiii',
+            $idAsignacion,
+            $direccionOriginal,
+            $direccionSearch,
+            $direccionCorregida,
+            $distritoOriginal,
+            $distritoCorregido,
+            $ubigeoOriginal,
+            $ubigeoCorregido,
+            $latitud,
+            $longitud,
+            $idFuente,
+            $validado,
+            $idSupervisor,
+            $validado
+        );
+        $stmt->execute();
+        $idDireccionCorregida = (int)$mysqli->insert_id;
+        $stmt->close();
+
+        $rowsVerificacion = query_all($mysqli, "
+            SELECT id_direccion_corregida, id_asignacion, direccion_original, direccion_search, direccion_corregida,
+                   distrito_original, distrito_corregido, ubigeo_original, ubigeo_corregido,
+                   latitud, longitud, id_fuente_correccion, validado, fecha_registro, fecha_validacion
+            FROM geocampo_direccion_corregida
+            WHERE id_direccion_corregida = ?
+            LIMIT 1
+        ", 'i', [$idDireccionCorregida]);
+
+        responder_json([
+            'ok' => true,
+            'message' => 'Dirección registrada por supervisor.',
+            'id_direccion_corregida' => $idDireccionCorregida,
+            'direccion' => $rowsVerificacion[0] ?? []
+        ]);
+    } catch (Throwable $e) {
+        responder_json([
+            'ok' => false,
+            'message' => 'No se pudo registrar la dirección.',
+            'error' => $e->getMessage()
+        ], 500);
+    }
+}
+
+function obtener_ruta_asesor_supervisor(mysqli $mysqli): void
+{
+    $idAsesor = (int)($_GET['asesorId'] ?? 0);
+    $fechaReferencia = validar_fecha_ruta(limpiar_texto($_GET['fechaReferencia'] ?? fecha_hoy_peru()));
+    $ctx = obtener_contexto_cartera($mysqli, $_GET['cartera'] ?? '');
+
+    if ($idAsesor <= 0) {
+        responder_json(['ok' => false, 'message' => 'Gestor inválido.'], 400);
+    }
+
+    $semana = obtener_rango_semana($fechaReferencia);
+    $inicioSemana = $semana['fecha_inicio_semana'];
+    $finSemana = $semana['fecha_fin_semana'];
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $idTable = (int)$ctx['id_table'];
+    $idCarteraCtx = (int)$ctx['id_cartera'];
+    $fuenteDirecciones = fuente_direcciones_campo($ctx);
+    $direccionesSql = subquery_direcciones_campo($fuenteDirecciones);
+
+    $rutas = query_all($mysqli, "
+        SELECT hr.id_hoja_ruta, hr.nombre_ruta, hr.fecha_ruta, hr.fecha_inicio_semana, hr.fecha_fin_semana, er.codigo AS estado_codigo, er.descripcion AS estado
+        FROM geocampo_hoja_ruta hr
+        INNER JOIN geocampo_estado_ruta er
+            ON er.id_estado_ruta = hr.id_estado_ruta
+        WHERE hr.id_asesor = ?
+          AND er.codigo IN ('CREADA', 'EN_PROCESO')
+          AND (
+                (
+                    hr.fecha_inicio_semana IS NOT NULL
+                    AND hr.fecha_fin_semana IS NOT NULL
+                    AND hr.fecha_inicio_semana <= ?
+                    AND hr.fecha_fin_semana >= ?
+                )
+                OR (
+                    hr.fecha_inicio_semana IS NULL
+                    AND hr.fecha_ruta BETWEEN ? AND ?
+                )
+          )
+        ORDER BY hr.fecha_actualizacion DESC, hr.id_hoja_ruta DESC
+        LIMIT 1
+    ", 'issss', [$idAsesor, $finSemana, $inicioSemana, $inicioSemana, $finSemana]);
+
+    if (!$rutas) {
+        responder_json([
+            'ok' => true,
+            'existe' => false,
+            'asesorId' => $idAsesor,
+            'semana' => $semana,
+            'ruta' => null,
+            'cuentas' => []
+        ]);
+    }
+
+    $ruta = $rutas[0];
+    $idHojaRuta = (int)$ruta['id_hoja_ruta'];
+
+    $rows = query_all($mysqli, "
+        SELECT
+            hrd.id_asignacion,
+            hrd.orden_visita,
+            hrd.fecha_agendada,
+            ga.id_cuenta_campo,
+            c.NUMEROCUENTA AS cuenta,
+            c.NOMBRE AS cliente,
+            c.PRODUCTO AS producto,
+            d.DEPARTAMENTO AS departamento,
+            d.PROVINCIA AS provincia,
+            d.DISTRITO AS distrito,
+            d.DIRECCION_DEPURADA AS direccion_depurada,
+            d.DIRECCION AS direccion_original_base,
+            d.REF_DEPURADA AS referencia_depurada,
+            d.REF AS referencia_original,
+            d.DEPARTAMENTO AS departamento_dir,
+            d.PROVINCIA AS provincia_dir,
+            d.DISTRITO AS distrito_dir,
+            dc.direccion_search,
+            dc.direccion_corregida,
+            dc.latitud,
+            dc.longitud,
+            ev.codigo AS estado_visita_codigo,
+            ev.descripcion AS estado_visita
+        FROM geocampo_hoja_ruta_detalle hrd
+        INNER JOIN geocampo_asignacion ga
+            ON ga.id_asignacion = hrd.id_asignacion
+           AND ga.activo = 1
+           AND ga.id_table = {$idTable}
+           AND ga.id_cartera = {$idCarteraCtx}
+           AND ga.id_asesor = ?
+        INNER JOIN {$tablaCuentas} c
+            ON c.id = ga.id_cuenta_campo
+        LEFT JOIN geocampo_estado_visita ev
+            ON ev.id_estado_visita = hrd.id_estado_visita
+        LEFT JOIN (
+            {$direccionesSql}
+        ) d
+            ON d.DOC = c.documento
+        LEFT JOIN geocampo_direccion_corregida dc
+            ON dc.id_direccion_corregida = (
+                SELECT dc2.id_direccion_corregida
+                FROM geocampo_direccion_corregida dc2
+                WHERE dc2.id_asignacion = ga.id_asignacion
+                ORDER BY dc2.id_direccion_corregida DESC
+                LIMIT 1
+            )
+        WHERE hrd.id_hoja_ruta = ?
+        ORDER BY COALESCE(hrd.orden_visita, 999999), hrd.id_detalle
+    ", 'ii', [$idAsesor, $idHojaRuta]);
+
+    responder_json([
+        'ok' => true,
+        'existe' => true,
+        'asesorId' => $idAsesor,
+        'semana' => $semana,
+        'ruta' => [
+            'id_hoja_ruta' => $idHojaRuta,
+            'nombre_ruta' => limpiar_texto($ruta['nombre_ruta'] ?? ''),
+            'fecha_inicio_semana' => limpiar_texto($ruta['fecha_inicio_semana'] ?? $inicioSemana),
+            'fecha_fin_semana' => limpiar_texto($ruta['fecha_fin_semana'] ?? $finSemana),
+            'estado_codigo' => limpiar_texto($ruta['estado_codigo'] ?? ''),
+            'estado' => limpiar_texto($ruta['estado'] ?? '')
+        ],
+        'cuentas' => array_map('normalizar_cuenta_ruta_supervisor', $rows)
+    ]);
 }
 
 
@@ -1274,6 +1665,14 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'ids_filtrados') {
         ids_filtrados($mysqli);
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'ruta_asesor') {
+        obtener_ruta_asesor_supervisor($mysqli);
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'guardar_direccion_supervisor') {
+        guardar_direccion_supervisor($mysqli);
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'preview_reasignacion') {

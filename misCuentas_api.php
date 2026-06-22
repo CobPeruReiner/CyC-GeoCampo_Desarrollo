@@ -26,6 +26,34 @@ function limpiar_texto($valor): string
     return trim((string)($valor ?? ''));
 }
 
+function subquery_direcciones_campo(string $fuente, string $columnas = 'DOC, DEPARTAMENTO, PROVINCIA, DISTRITO, DIRECCION_DEPURADA, DIRECCION, REF_DEPURADA, REF'): string
+{
+    $fuente = preg_replace('/[^0-9]/', '', $fuente);
+    if ($fuente === '') {
+        $fuente = '11';
+    }
+
+    return "
+            SELECT {$columnas}
+            FROM (
+                SELECT
+                    d.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY d.DOC
+                        ORDER BY d.FECHA_ACTUALIZACION DESC
+                    ) AS rn
+                FROM direcciones d
+                WHERE d.DOC IS NOT NULL
+                  AND d.DOC <> ''
+                  AND d.FUENTE = '{$fuente}'
+                  AND COALESCE(d.IDESTADO, 1) = 1
+                  AND d.FECHA_ACTUALIZACION >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+                  AND d.FECHA_ACTUALIZACION < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
+            ) x
+            WHERE x.rn = 1
+    ";
+}
+
 function fecha_hoy_peru(): string
 {
     return date('Y-m-d');
@@ -316,6 +344,9 @@ function from_mis_cuentas(array $filtros = [], string &$typesFrom = '', array &$
     $paramsFrom[] = $inicioSemana . ' 00:00:00';
     $paramsFrom[] = $finSemana . ' 23:59:59';
 
+    // Mis Cuentas actualmente consume FINANCIERA EFECTIVA CAMPO, por eso usa FUENTE 11.
+    $direccionesSql = subquery_direcciones_campo('11');
+
     return "
         FROM geocampo_asignacion ga
 
@@ -350,20 +381,7 @@ function from_mis_cuentas(array $filtros = [], string &$typesFrom = '', array &$
             ON ea.id_estado_asignacion = ga.id_estado_asignacion
 
         LEFT JOIN (
-            SELECT DISTINCT
-                DOC,
-                DEPARTAMENTO,
-                PROVINCIA,
-                DISTRITO,
-                DIRECCION_DEPURADA,
-                DIRECCION,
-                REF_DEPURADA,
-                REF
-            FROM direcciones
-            WHERE DOC IS NOT NULL
-            AND DOC <> ''
-            AND FUENTE = '11'
-            AND COALESCE(IDESTADO, 1) = 1
+            {$direccionesSql}
         ) d
             ON d.DOC = c.documento
         LEFT JOIN geocampo_direccion_corregida dc
@@ -374,6 +392,16 @@ function from_mis_cuentas(array $filtros = [], string &$typesFrom = '', array &$
                 ORDER BY dc2.id_direccion_corregida DESC
                 LIMIT 1
             )
+
+        LEFT JOIN (
+            SELECT fecha_inicio, fecha_fin
+            FROM geocampo_periodo
+            WHERE activo = 1
+              AND CURDATE() BETWEEN fecha_inicio AND fecha_fin
+            ORDER BY fecha_inicio DESC
+            LIMIT 1
+        ) gp_pago
+            ON 1 = 1
 
         LEFT JOIN (
             SELECT
@@ -422,6 +450,34 @@ function select_campos_mis_cuentas(): string
             dc.ubigeo_corregido,
             dc.latitud,
             dc.longitud,
+            CASE WHEN EXISTS (
+                SELECT 1
+                FROM pagos pg
+                WHERE pg.IDCARTERA = ga.id_cartera
+                  AND pg.IDENTIFICADOR = c.identificador
+                  AND COALESCE(pg.IDESTADO, 0) = 0
+                  AND DATE(pg.FECHAPAG) BETWEEN COALESCE(gp_pago.fecha_inicio, DATE_FORMAT(CURDATE(), '%Y-%m-01'))
+                                          AND COALESCE(gp_pago.fecha_fin, LAST_DAY(CURDATE()))
+                LIMIT 1
+            ) THEN 1 ELSE 0 END AS tiene_pago,
+            (
+                SELECT MAX(pg.FECHAPAG)
+                FROM pagos pg
+                WHERE pg.IDCARTERA = ga.id_cartera
+                  AND pg.IDENTIFICADOR = c.identificador
+                  AND COALESCE(pg.IDESTADO, 0) = 0
+                  AND DATE(pg.FECHAPAG) BETWEEN COALESCE(gp_pago.fecha_inicio, DATE_FORMAT(CURDATE(), '%Y-%m-01'))
+                                          AND COALESCE(gp_pago.fecha_fin, LAST_DAY(CURDATE()))
+            ) AS fecha_pago,
+            (
+                SELECT COALESCE(SUM(pg.MONTO), 0)
+                FROM pagos pg
+                WHERE pg.IDCARTERA = ga.id_cartera
+                  AND pg.IDENTIFICADOR = c.identificador
+                  AND COALESCE(pg.IDESTADO, 0) = 0
+                  AND DATE(pg.FECHAPAG) BETWEEN COALESCE(gp_pago.fecha_inicio, DATE_FORMAT(CURDATE(), '%Y-%m-01'))
+                                          AND COALESCE(gp_pago.fecha_fin, LAST_DAY(CURDATE()))
+            ) AS monto_pago,
             COALESCE(ev.codigo, ea.codigo, 'PENDIENTE') AS estado_visita_codigo,
             COALESCE(ev.descripcion, ea.descripcion, 'Pendiente') AS estado_visita,
             COALESCE(vgd.cantidad_visitas_dia, 0) AS cantidad_visitas_dia,
@@ -485,6 +541,10 @@ function normalizar_cuenta(array $row): array
         'distrito_original' => $distritoDir,
         'ubigeo_original' => $ubigeoOriginal,
         'importe' => (float)($row['importe'] ?? 0),
+        'tiene_pago' => (int)($row['tiene_pago'] ?? 0),
+        'estado_pago' => ((int)($row['tiene_pago'] ?? 0) === 1) ? 'Pago' : 'No pago',
+        'fecha_pago' => limpiar_texto($row['fecha_pago'] ?? ''),
+        'monto_pago' => (float)($row['monto_pago'] ?? 0),
         'direccion_original' => $direccionOriginal !== '' ? $direccionOriginal : 'Sin dirección registrada',
         'direccion_search' => $direccionSearch,
         'direccion_corregida' => $direccionCorregida,
@@ -563,22 +623,16 @@ function consultar_mis_cuentas(mysqli $mysqli, int $idAsesor, array $filtros, in
 
 function cargar_filtros(mysqli $mysqli, int $idAsesor): array
 {
+    // FINANCIERA EFECTIVA CAMPO usa FUENTE 11.
+    $direccionesDistritoSql = subquery_direcciones_campo('11', 'DOC, DISTRITO');
+
     $distritos = query_all($mysqli, "
         SELECT DISTINCT d.DISTRITO AS valor
         FROM geocampo_asignacion ga
         INNER JOIN C_FINANCIERA_EFECTIVA_CAMPO c 
             ON c.id = ga.id_cuenta_campo
         LEFT JOIN (
-            SELECT DISTINCT
-                DOC,
-                DISTRITO
-            FROM direcciones
-            WHERE DOC IS NOT NULL
-            AND DOC <> ''
-            AND FUENTE = '11'
-            AND COALESCE(IDESTADO, 1) = 1
-            AND DISTRITO IS NOT NULL
-            AND TRIM(DISTRITO) <> ''
+            {$direccionesDistritoSql}
         ) d 
             ON d.DOC = c.documento
         WHERE ga.activo = 1 

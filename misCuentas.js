@@ -631,7 +631,7 @@ function renderTabla() {
 
   if (estado.cuentas.length === 0) {
     $("#tablaCuentas").innerHTML =
-      `<tr><td colspan="9" class="px-4 py-8 text-center text-gray-400">No se encontraron cuentas asignadas con los filtros seleccionados.</td></tr>`;
+      `<tr><td colspan="10" class="px-4 py-8 text-center text-gray-400">No se encontraron cuentas asignadas con los filtros seleccionados.</td></tr>`;
     return;
   }
 
@@ -642,6 +642,10 @@ function renderTabla() {
       const checked = estado.seleccionadas.includes(cuenta.id_asignacion);
       const sugerida = cuenta.direccion_sugerida || "Sin dirección sugerida";
       const coordValida = cuenta.coord_status === "VALIDA";
+      const tienePago = Number(cuenta.tiene_pago || 0) === 1;
+      const pagoTitulo = tienePago
+        ? `Fecha: ${cuenta.fecha_pago || "-"} | Monto: ${formatoMoneda(cuenta.monto_pago || 0)}`
+        : "Sin pago registrado en el periodo";
       const numeroOrden =
         cuenta.orden_visita || estado.paginacion.desde + index;
       const claseDrag = permiteDragTabla ? "cursor-move" : "";
@@ -670,6 +674,12 @@ function renderTabla() {
           <span class="block text-[10px] text-gray-400">${escaparHTML(cuenta.producto)}</span>
         </td>
         <td class="px-3 py-3 align-middle text-right font-bold">${formatoMoneda(cuenta.importe)}</td>
+        <td class="px-3 py-3 align-middle">
+          <span title="${escaparHTML(pagoTitulo)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${tienePago ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-red-50 border-red-100 text-red-700"}">
+            <i data-lucide="${tienePago ? "badge-check" : "circle-x"}" class="w-3 h-3"></i>
+            ${tienePago ? "Pago" : "No pago"}
+          </span>
+        </td>
         <td class="px-3 py-3 align-middle">
           <span class="inline-flex items-center gap-1 ${coordValida ? "text-emerald-600" : "text-orange-500"}">
             <i data-lucide="${coordValida ? "map-pinned" : "circle-alert"}" class="w-3 h-3"></i>

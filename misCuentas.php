@@ -224,6 +224,7 @@ $_SESSION['id_mis_cuentas'] = $idUsuario;
                   <th class="px-3 py-3 text-left">Dirección Original / Dirección Sugerida</th>
                   <th class="px-3 py-3 text-left">Distrito / Producto</th>
                   <th class="px-3 py-3 text-right">Importe</th>
+                  <th class="px-3 py-3 text-left">Pago</th>
                   <th class="px-3 py-3 text-left">Coord. Status</th>
                   <th class="px-3 py-3 text-left">Estado Visita</th>
                   <th class="px-3 py-3 text-left">Visitas Semana</th>
@@ -412,7 +413,7 @@ $_SESSION['id_mis_cuentas'] = $idUsuario;
     window.initMap = window.initMap || function() {};
   </script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCGFBIf_6mCinwpqWw2Q-lHwNmK6u2iMhE&libraries=places,marker&callback=initMap"></script>
-  <script src="misCuentas.js?v=20260601_feedback_mapa_ruta_v1"></script>
+  <script src="misCuentas.js?v=20260622_pago_v1"></script>
 </body>
 
 </html>
