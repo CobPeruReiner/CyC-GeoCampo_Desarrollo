@@ -323,6 +323,110 @@ function nombre_tabla_sql(array $ctx): string
     return "`{$tabla}`";
 }
 
+function obtener_columnas_gui(mysqli $mysqli, int $idTable): array
+{
+    $rows = query_all($mysqli, "
+        SELECT campo, alias, color, type, width, orden
+        FROM gui_table
+        WHERE id_table = ?
+        ORDER BY orden ASC, id ASC
+    ", 'i', [$idTable]);
+
+    $columnas = [];
+    foreach ($rows as $row) {
+        $field = limpiar_texto($row['campo'] ?? '');
+        if ($field === '') {
+            continue;
+        }
+        $columnas[] = [
+            'field' => $field,
+            'header' => limpiar_texto($row['alias'] ?? '') ?: $field,
+            'type' => limpiar_texto($row['type'] ?? '') ?: 'TEXT',
+            'width' => (int)($row['width'] ?: 130),
+            'color' => limpiar_texto($row['color'] ?? ''),
+        ];
+    }
+    return $columnas;
+}
+
+function obtener_info_cliente_asignar(mysqli $mysqli, array $ctx, string $identificador): array
+{
+    $identificador = limpiar_texto($identificador);
+    if ($identificador === '') {
+        throw new Exception('No se recibió el cliente.');
+    }
+
+    $idTable = (int)($ctx['id_table'] ?? 0);
+    $tablaFisica = limpiar_texto($ctx['tabla'] ?? '');
+    if ($idTable <= 0 || $tablaFisica === '' || !tabla_fisica_existe($mysqli, $tablaFisica)) {
+        throw new Exception('No se encontró la tabla de la cartera seleccionada.');
+    }
+
+    $tabla = nombre_tabla_sql($ctx);
+    $columnas = obtener_columnas_gui($mysqli, $idTable);
+    $whereEstado = columna_fisica_existe($mysqli, $tablaFisica, 'ESTADO') ? " AND ESTADO = 'ACTIVO'" : '';
+
+    $rows = query_all($mysqli, "
+        SELECT *
+        FROM {$tabla}
+        WHERE IDENTIFICADOR = ?
+        {$whereEstado}
+        LIMIT 1
+    ", 's', [$identificador]);
+
+    $registro = $rows[0] ?? [];
+    if (!$columnas && $registro) {
+        foreach (array_keys($registro) as $campo) {
+            if (count($columnas) >= 40) {
+                break;
+            }
+            $columnas[] = [
+                'field' => $campo,
+                'header' => $campo,
+                'type' => 'TEXT',
+                'width' => 130,
+                'color' => '',
+            ];
+        }
+    }
+
+    $valores = [];
+    foreach ($columnas as $col) {
+        $field = limpiar_texto($col['field'] ?? '');
+        if ($field === '') {
+            continue;
+        }
+        $valores[] = [
+            'field' => $field,
+            'header' => limpiar_texto($col['header'] ?? '') ?: $field,
+            'type' => limpiar_texto($col['type'] ?? '') ?: 'TEXT',
+            'width' => (int)($col['width'] ?? 130),
+            'value' => $registro[$field] ?? '',
+        ];
+    }
+
+    return [
+        'cartera' => $ctx,
+        'table_name' => $tablaFisica,
+        'identificador' => $identificador,
+        'columnas' => $columnas,
+        'valores' => $valores,
+        'registro' => $registro,
+    ];
+}
+
+function responder_info_cliente_asignar(mysqli $mysqli): void
+{
+    $filtros = obtener_filtros_desde_array($_GET);
+    $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
+    $identificador = limpiar_texto($_GET['identificador'] ?? '');
+
+    responder_json([
+        'ok' => true,
+        'data' => obtener_info_cliente_asignar($mysqli, $ctx, $identificador)
+    ]);
+}
+
 function fuente_direcciones_campo(array $ctx): string
 {
     $idTable = (int)($ctx['id_table'] ?? 0);
@@ -646,6 +750,8 @@ function normalizar_cuentas(array $cuentas): array
 {
     foreach ($cuentas as &$cuenta) {
         $cuenta['id'] = (int)$cuenta['id'];
+        $cuenta['identificador'] = limpiar_texto($cuenta['identificador'] ?? '');
+        $cuenta['documento'] = limpiar_texto($cuenta['documento'] ?? '');
         $cuenta['id_asignacion'] = $cuenta['id_asignacion'] !== null ? (int)$cuenta['id_asignacion'] : null;
         $cuenta['asesorId'] = $cuenta['asesorId'] !== null ? (int)$cuenta['asesorId'] : null;
         $cuenta['importe'] = (float)($cuenta['importe'] ?? 0);
@@ -692,7 +798,21 @@ function normalizar_cuentas(array $cuentas): array
         $cuenta['ubigeo'] = $ubigeoDir ?: 'Sin ubigeo';
         $cuenta['segmento'] = limpiar_texto($cuenta['segmento']) ?: 'Sin producto';
         $cuenta['cartera'] = limpiar_texto($cuenta['cartera']) ?: 'Sin cartera';
-        $cuenta['estado'] = $cuenta['asesorId'] === null ? 'Sin asignar' : $cuenta['estado'];
+
+        $estadoCodigo = strtoupper(limpiar_texto($cuenta['estado_codigo'] ?? $cuenta['estadoCodigo'] ?? ''));
+        $estadoDescripcion = limpiar_texto($cuenta['estado_descripcion'] ?? $cuenta['estado'] ?? '');
+        if ($cuenta['asesorId'] === null) {
+            $estadoCodigo = 'SIN_ASIGNAR';
+            $estadoDescripcion = 'Registro sin asignación activa';
+        } elseif ($estadoCodigo === '') {
+            $estadoCodigo = 'PENDIENTE';
+            $estadoDescripcion = $estadoDescripcion ?: 'Registro asignado al asesor, pendiente de hoja de ruta';
+        }
+        $cuenta['estado_codigo'] = $estadoCodigo;
+        $cuenta['estado_general'] = $estadoCodigo;
+        $cuenta['estado_descripcion'] = $estadoDescripcion ?: $estadoCodigo;
+        $cuenta['estado_tooltip'] = $cuenta['estado_descripcion'];
+        $cuenta['estado'] = $cuenta['estado_descripcion'];
     }
     unset($cuenta);
 
@@ -773,6 +893,8 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
     $sql = "
         SELECT
             c.id,
+            c.identificador AS identificador,
+            c.documento AS documento,
             c.NUMEROCUENTA AS cuenta,
             c.NOMBRE AS cliente,
             c.PRODUCTO AS segmento,
@@ -806,8 +928,9 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             vgs.ultima_fecha_visita_semana,
             ga.id_asignacion,
             ga.id_asesor AS asesorId,
-            ea.codigo AS estadoCodigo,
-            COALESCE(ea.descripcion, 'Sin asignar') AS estado
+            ea.codigo AS estado_codigo,
+            COALESCE(ea.descripcion, 'Sin asignar') AS estado_descripcion,
+            ea.descripcion AS estado
         {$from}
         {$where}
         ORDER BY c.id DESC
@@ -1005,6 +1128,7 @@ function cargar_cuentas(mysqli $mysqli): void
         'ok' => true,
         'tablaSeleccionada' => $ctx,
         'periodoPago' => obtener_periodo_pago_actual($mysqli),
+        'asesores' => cargar_asesores($mysqli, $ctx),
         'filtros' => cargar_filtros($mysqli, $ctx),
         'cuentas' => $resultadoCuentas['cuentas'],
         'paginacion' => $resultadoCuentas['paginacion']
@@ -1665,6 +1789,10 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'ids_filtrados') {
         ids_filtrados($mysqli);
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'info_cliente') {
+        responder_info_cliente_asignar($mysqli);
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'ruta_asesor') {

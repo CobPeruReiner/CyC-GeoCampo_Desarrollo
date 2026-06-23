@@ -478,6 +478,8 @@ function select_campos_mis_cuentas(): string
                   AND DATE(pg.FECHAPAG) BETWEEN COALESCE(gp_pago.fecha_inicio, DATE_FORMAT(CURDATE(), '%Y-%m-01'))
                                           AND COALESCE(gp_pago.fecha_fin, LAST_DAY(CURDATE()))
             ) AS monto_pago,
+            COALESCE(ea.codigo, 'PENDIENTE') AS estado_general_codigo,
+            COALESCE(ea.descripcion, 'Registro asignado al asesor, pendiente de hoja de ruta') AS estado_general_descripcion,
             COALESCE(ev.codigo, ea.codigo, 'PENDIENTE') AS estado_visita_codigo,
             COALESCE(ev.descripcion, ea.descripcion, 'Pendiente') AS estado_visita,
             COALESCE(vgd.cantidad_visitas_dia, 0) AS cantidad_visitas_dia,
@@ -554,6 +556,10 @@ function normalizar_cuenta(array $row): array
         'latitud' => $latitud,
         'longitud' => $longitud,
         'coord_status' => ($latitud !== 0.0 && $longitud !== 0.0) ? 'VALIDA' : 'POR_VALIDAR',
+        'estado_general' => limpiar_texto($row['estado_general_codigo'] ?? '') ?: 'PENDIENTE',
+        'estado_codigo' => limpiar_texto($row['estado_general_codigo'] ?? '') ?: 'PENDIENTE',
+        'estado_descripcion' => limpiar_texto($row['estado_general_descripcion'] ?? '') ?: 'Registro asignado al asesor, pendiente de hoja de ruta',
+        'estado_tooltip' => limpiar_texto($row['estado_general_descripcion'] ?? '') ?: 'Registro asignado al asesor, pendiente de hoja de ruta',
         'estado_visita_codigo' => limpiar_texto($row['estado_visita_codigo']) ?: 'PENDIENTE',
         'estado_visita' => limpiar_texto($row['estado_visita']) ?: 'Pendiente',
         'orden_visita' => $row['orden_visita'] !== null ? (int)$row['orden_visita'] : null,

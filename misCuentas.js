@@ -595,7 +595,10 @@ function renderLoader() {
     .join("");
 }
 
-function badgeEstado(codigo, texto) {
+function badgeEstado(codigo, descripcion) {
+  const codigoEstado = String(codigo || "PENDIENTE").trim() || "PENDIENTE";
+  const descripcionEstado =
+    String(descripcion || codigoEstado).trim() || codigoEstado;
   const clases = {
     AGENDADO: "bg-blue-50 text-blue-600 border-blue-100",
     VISITADO: "bg-green-50 text-green-600 border-green-100",
@@ -605,7 +608,11 @@ function badgeEstado(codigo, texto) {
     EN_CAMINO: "bg-indigo-50 text-indigo-600 border-indigo-100",
     REPROGRAMADO: "bg-yellow-50 text-yellow-700 border-yellow-100",
     CANCELADO: "bg-gray-100 text-gray-500 border-gray-200",
+    CERRADO: "bg-slate-100 text-slate-600 border-slate-200",
+    ANULADO: "bg-red-50 text-red-600 border-red-100",
     PENDIENTE: "bg-gray-100 text-gray-500 border-gray-200",
+    SIN_RUTA: "bg-gray-100 text-gray-500 border-gray-200",
+    SIN_ASIGNAR: "bg-gray-100 text-gray-500 border-gray-200",
   };
   const iconos = {
     AGENDADO: "calendar-days",
@@ -616,10 +623,31 @@ function badgeEstado(codigo, texto) {
     EN_CAMINO: "navigation",
     REPROGRAMADO: "calendar-clock",
     CANCELADO: "ban",
+    CERRADO: "lock",
+    ANULADO: "circle-slash",
     PENDIENTE: "clock-3",
+    SIN_RUTA: "clock-3",
+    SIN_ASIGNAR: "circle-help",
   };
-  return `<span class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${clases[codigo] || clases.PENDIENTE}"><i data-lucide="${iconos[codigo] || "clock-3"}" class="w-3 h-3"></i>${escaparHTML(texto)}</span>`;
+  return `<span title="${escaparHTML(descripcionEstado)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${clases[codigoEstado] || clases.PENDIENTE}"><i data-lucide="${iconos[codigoEstado] || "clock-3"}" class="w-3 h-3"></i>${escaparHTML(codigoEstado)}</span>`;
 }
+
+
+function estadoGeneralCuenta(cuenta) {
+  const codigo =
+    cuenta.estado_general ||
+    cuenta.estado_codigo ||
+    cuenta.estado_visita_codigo ||
+    "PENDIENTE";
+  const descripcion =
+    cuenta.estado_tooltip ||
+    cuenta.estado_descripcion ||
+    cuenta.estado_general_descripcion ||
+    cuenta.estado_visita ||
+    codigo;
+  return { codigo, descripcion };
+}
+
 
 function renderTabla() {
   if (estado.cargando) {
@@ -649,6 +677,7 @@ function renderTabla() {
       const numeroOrden =
         cuenta.orden_visita || estado.paginacion.desde + index;
       const claseDrag = permiteDragTabla ? "cursor-move" : "";
+      const estadoGeneral = estadoGeneralCuenta(cuenta);
 
       return `
       <tr draggable="${permiteDragTabla ? "true" : "false"}" data-id-asignacion="${cuenta.id_asignacion}" class="filaCuenta ${claseDrag} ${checked ? "bg-blue-50/60" : "bg-white"} hover:bg-blue-50/40">
@@ -686,7 +715,7 @@ function renderTabla() {
             ${coordValida ? "Válida" : "Por Validar"}
           </span>
         </td>
-        <td class="px-3 py-3 align-middle">${badgeEstado(cuenta.estado_visita_codigo, cuenta.estado_visita)}</td>
+        <td class="px-3 py-3 align-middle">${badgeEstado(estadoGeneral.codigo, estadoGeneral.descripcion)}</td>
         <td class="px-3 py-3 align-middle">${htmlVisitasHoy(cuenta)}</td>
         <td class="px-3 py-3 align-middle">
           <button type="button" class="btnDireccion px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-[11px]" data-id-asignacion="${cuenta.id_asignacion}">
@@ -783,7 +812,7 @@ function renderVistaRuta() {
           </div>
           <p class="mt-1 text-[10px] text-gray-400 truncate">${escaparHTML(cuenta.direccion_sugerida || cuenta.direccion_original)}</p>
           <div class="mt-2 flex items-center justify-between gap-2">
-            ${badgeEstado(cuenta.estado_visita_codigo, cuenta.estado_visita)}
+            ${badgeEstado(estadoGeneralCuenta(cuenta).codigo, estadoGeneralCuenta(cuenta).descripcion)}
             <span class="text-[10px] text-gray-400">${escaparHTML(cuenta.distrito)}</span>
           </div>
           <div class="mt-2 flex items-center justify-between gap-2 text-[10px]">
@@ -1481,7 +1510,7 @@ function renderListaMapaRuta() {
               <p class="mt-1 text-[10px] text-gray-400 truncate">${escaparHTML(cuenta.direccion_original)}</p>
               <p class="mt-1 text-[10px] text-blue-600 truncate">${escaparHTML(cuenta.direccion_corregida || cuenta.direccion_search || cuenta.direccion_sugerida || "Sin dirección sugerida")}</p>
               <div class="mt-2 flex items-center justify-between gap-2">
-                ${badgeEstado(cuenta.estado_visita_codigo, cuenta.estado_visita)}
+                ${badgeEstado(estadoGeneralCuenta(cuenta).codigo, estadoGeneralCuenta(cuenta).descripcion)}
                 <span class="text-[10px] ${conCoords ? "text-gray-400" : "text-orange-500"}">${conCoords ? escaparHTML(cuenta.distrito) : "Pendiente"}</span>
               </div>
             </div>

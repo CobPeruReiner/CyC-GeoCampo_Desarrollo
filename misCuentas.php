@@ -226,7 +226,7 @@ $_SESSION['id_mis_cuentas'] = $idUsuario;
                   <th class="px-3 py-3 text-right">Importe</th>
                   <th class="px-3 py-3 text-left">Pago</th>
                   <th class="px-3 py-3 text-left">Coord. Status</th>
-                  <th class="px-3 py-3 text-left">Estado Visita</th>
+                  <th class="px-3 py-3 text-left">Estado General</th>
                   <th class="px-3 py-3 text-left">Visitas Semana</th>
                   <th class="px-3 py-3 text-left">Acción</th>
                 </tr>

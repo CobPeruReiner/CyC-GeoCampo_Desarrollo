@@ -286,7 +286,7 @@ if (empty($_SESSION['id'])) {
                   <th class="px-3 py-3 text-left">Distrito / Ubigeo</th>
                   <th class="px-3 py-3 text-left">Importe</th>
                   <th class="px-3 py-3 text-left">Asesor Actual</th>
-                  <th class="px-3 py-3 text-left">Estado</th>
+                  <th class="px-3 py-3 text-left">Estado General</th>
                   <th class="px-3 py-3 text-left">Pago</th>
                   <th class="px-3 py-3 text-left">Visitas Semana</th>
                   <th class="px-3 py-3 text-left">Acción</th>

@@ -50,6 +50,28 @@ function escaparHTML(valor) {
     .replaceAll("'", "&#039;");
 }
 
+function claseEstadoAsignacion(codigo) {
+  const estado = String(codigo || "").toUpperCase();
+  if (["VISITADO", "CERRADO"].includes(estado)) {
+    return "bg-emerald-50 border-emerald-100 text-emerald-700";
+  }
+  if (["PENDIENTE", "SIN_ASIGNAR"].includes(estado)) {
+    return "bg-amber-50 border-amber-100 text-amber-700";
+  }
+  if (["AGENDADO", "REPROGRAMADO"].includes(estado)) {
+    return "bg-blue-50 border-blue-100 text-blue-700";
+  }
+  if (["NO_ENCONTRADO", "ANULADO"].includes(estado)) {
+    return "bg-red-50 border-red-100 text-red-700";
+  }
+  return "bg-gray-100 border-gray-200 text-gray-600";
+}
+
+function valorVisibleInfoCliente(valor) {
+  const texto = String(valor ?? "").trim();
+  return texto !== "" ? texto : "-";
+}
+
 function asegurarModalConfirmacion() {
   let modal = $("#modalConfirmacionGlobal");
   if (modal) return modal;
@@ -167,6 +189,102 @@ function mostrarErrorAsignacion(error) {
     icono: "circle-alert",
     claseIcono: "border-red-100 bg-red-50 text-red-700",
   });
+}
+
+function asegurarModalInfoCliente() {
+  let modal = $("#modalInfoClienteAsignar");
+  if (modal) return modal;
+
+  modal = document.createElement("div");
+  modal.id = "modalInfoClienteAsignar";
+  modal.className = "hidden fixed inset-0 z-50 bg-slate-900/50 p-4";
+  modal.innerHTML = `
+    <div class="mx-auto my-8 w-full max-w-5xl bg-white rounded-2xl shadow-2xl border border-gray-200 overflow-hidden flex flex-col max-h-[88vh]">
+      <div class="px-5 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+        <div>
+          <h3 id="infoClienteTitulo" class="font-bold text-base flex items-center gap-2">
+            <i data-lucide="id-card" class="w-4 h-4 text-[#FF161A]"></i>
+            Información del cliente
+          </h3>
+          <p id="infoClienteSubtitulo" class="text-xs text-gray-500 mt-1"></p>
+        </div>
+        <button id="btnCerrarInfoCliente" type="button" class="w-9 h-9 rounded-xl border border-gray-200 hover:bg-gray-50 flex items-center justify-center text-gray-500">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+      <div id="infoClienteContenido" class="p-5 overflow-auto scroll-suave"></div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+
+  $("#btnCerrarInfoCliente").addEventListener("click", cerrarModalInfoCliente);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) cerrarModalInfoCliente();
+  });
+
+  return modal;
+}
+
+function cerrarModalInfoCliente() {
+  const modal = $("#modalInfoClienteAsignar");
+  if (!modal) return;
+  modal.classList.add("hidden");
+  modal.classList.remove("flex");
+  $("#infoClienteContenido").innerHTML = "";
+}
+
+function pintarInfoCliente(titulo, subtitulo, contenidoHTML) {
+  const modal = asegurarModalInfoCliente();
+  $("#infoClienteTitulo").innerHTML = `
+    <i data-lucide="id-card" class="w-4 h-4 text-[#FF161A]"></i>
+    ${escaparHTML(titulo)}
+  `;
+  $("#infoClienteSubtitulo").textContent = subtitulo || "";
+  $("#infoClienteContenido").innerHTML = contenidoHTML;
+  modal.classList.remove("hidden");
+  modal.classList.add("flex");
+  lucide.createIcons();
+}
+
+async function abrirInfoClienteAsignar(idCuenta) {
+  const cuenta = cuentas.find((item) => Number(item.id) === Number(idCuenta));
+  if (!cuenta) return;
+
+  const subtitulo = `${cuenta.cliente || "Cliente"}${cuenta.documento ? ` · ${cuenta.documento}` : ""}`;
+  pintarInfoCliente("Información del cliente", subtitulo, `<div class="text-sm text-gray-500">Cargando información...</div>`);
+
+  try {
+    const data = await apiGet("info_cliente", {
+      cartera: $("#filtroCartera").value,
+      identificador: cuenta.identificador,
+    });
+
+    const valores = data.data?.valores || [];
+    const html = valores.length
+      ? `
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          ${valores
+            .map(
+              (item) => `
+                <div class="border border-gray-200 rounded-xl p-3 bg-gray-50">
+                  <div class="text-[11px] uppercase tracking-wide text-gray-400 font-semibold">${escaparHTML(item.header)}</div>
+                  <div class="mt-1 text-sm text-gray-900 break-words">${escaparHTML(valorVisibleInfoCliente(item.value))}</div>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      `
+      : `<div class="p-4 rounded-xl bg-gray-50 text-gray-500 text-sm">No se encontró información activa del cliente.</div>`;
+
+    pintarInfoCliente("Información del cliente", subtitulo, html);
+  } catch (error) {
+    pintarInfoCliente(
+      "Información del cliente",
+      subtitulo,
+      `<div class="p-4 rounded-xl bg-red-50 text-red-700 text-sm">${escaparHTML(error.message)}</div>`,
+    );
+  }
 }
 
 function formatoMoneda(valor) {
@@ -841,6 +959,40 @@ function setSelectOptions(select, opciones, placeholder = "Todos") {
   select.classList.remove("animate-pulse", "bg-gray-100", "cursor-wait");
 }
 
+function valorExisteEnOpciones(select, valor) {
+  if (!select || valor === "") return true;
+  return Array.from(select.options).some((opcion) => opcion.value === valor);
+}
+
+function actualizarFiltrosDependientes(filtros, mantenerValores = true) {
+  if (!filtros) return;
+
+  const distritoActual = $("#filtroDistrito")?.value || "";
+  const segmentoActual = $("#filtroSegmento")?.value || "";
+  const estadoActual = $("#filtroEstado")?.value || "";
+  const pagoActual = $("#filtroPago")?.value || "";
+
+  setSelectOptions($("#filtroDistrito"), filtros.distritos || [], "Todos");
+  setSelectOptions($("#filtroSegmento"), filtros.segmentos || [], "Todos");
+  setSelectOptions($("#filtroEstado"), filtros.estados || [], "Todos");
+  setSelectOptions($("#filtroPago"), filtros.pagos || [], "Todos");
+
+  if (mantenerValores) {
+    if (valorExisteEnOpciones($("#filtroDistrito"), distritoActual)) $("#filtroDistrito").value = distritoActual;
+    if (valorExisteEnOpciones($("#filtroSegmento"), segmentoActual)) $("#filtroSegmento").value = segmentoActual;
+    if (valorExisteEnOpciones($("#filtroEstado"), estadoActual)) $("#filtroEstado").value = estadoActual;
+    if (valorExisteEnOpciones($("#filtroPago"), pagoActual)) $("#filtroPago").value = pagoActual;
+  }
+}
+
+function sincronizarAsesoresDesdeBackend(nuevosAsesores = []) {
+  asesores = nuevosAsesores;
+  if (!asesores.some((asesor) => asesor.id === asesorSeleccionadoId)) {
+    asesorSeleccionadoId = null;
+  }
+  normalizarPaginaAsesores();
+}
+
 function setControlesDisabled(disabled) {
   [
     "#filtroFecha",
@@ -964,6 +1116,10 @@ function renderCuentas() {
         cuenta.direccion ||
         "";
       const puedeEditarDireccion = Number(cuenta.id_asignacion || 0) > 0;
+      const estadoCodigo = cuenta.estado_general || cuenta.estado_codigo || (cuenta.asesorId ? "PENDIENTE" : "SIN_ASIGNAR");
+      const estadoDescripcion = cuenta.estado_tooltip || cuenta.estado_descripcion || cuenta.estado || estadoCodigo;
+      const estadoClase = claseEstadoAsignacion(estadoCodigo);
+      const puedeVerInfo = String(cuenta.identificador || "").trim() !== "";
 
       return `
         <tr class="${seleccionada ? "bg-blue-50/60" : "bg-white"} hover:bg-blue-50/40">
@@ -999,9 +1155,9 @@ function renderCuentas() {
           <td class="px-3 py-3 font-semibold">${escaparHTML(obtenerNombreAsesor(cuenta.asesorId))}</td>
 
           <td class="px-3 py-3">
-            <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 border text-gray-500">
+            <span title="${escaparHTML(estadoDescripcion)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${estadoClase}">
               <i data-lucide="clock-3" class="w-3 h-3"></i>
-              ${escaparHTML(cuenta.estado)}
+              ${escaparHTML(estadoCodigo)}
             </span>
           </td>
 
@@ -1020,15 +1176,28 @@ function renderCuentas() {
           </td>
 
           <td class="px-3 py-3">
-            <button type="button" class="btnDireccionSupervisor inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-[11px] disabled:opacity-40 disabled:cursor-not-allowed" data-id-asignacion="${cuenta.id_asignacion || ""}" ${puedeEditarDireccion ? "" : "disabled"} title="${puedeEditarDireccion ? "Actualizar dirección" : "Primero debe existir una asignación activa"}">
-              <i data-lucide="map-pin" class="w-3 h-3"></i>
-              Dirección
-            </button>
+            <div class="flex flex-col gap-1 min-w-[92px]">
+              <button type="button" class="btnInfoCliente inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-[11px] disabled:opacity-40 disabled:cursor-not-allowed" data-id-cuenta="${cuenta.id}" ${puedeVerInfo ? "" : "disabled"} title="${puedeVerInfo ? "Ver información del cliente" : "Cliente sin identificador"}">
+                <i data-lucide="id-card" class="w-3 h-3"></i>
+                Info
+              </button>
+              <button type="button" class="btnDireccionSupervisor inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-[11px] disabled:opacity-40 disabled:cursor-not-allowed" data-id-asignacion="${cuenta.id_asignacion || ""}" ${puedeEditarDireccion ? "" : "disabled"} title="${puedeEditarDireccion ? "Actualizar dirección" : "Primero debe existir una asignación activa"}">
+                <i data-lucide="map-pin" class="w-3 h-3"></i>
+                Dirección
+              </button>
+            </div>
           </td>
         </tr>
       `;
     })
     .join("");
+
+  document.querySelectorAll(".btnInfoCliente").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idCuenta = Number(btn.dataset.idCuenta || 0);
+      if (idCuenta > 0) abrirInfoClienteAsignar(idCuenta);
+    });
+  });
 
   document.querySelectorAll(".btnDireccionSupervisor").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1057,7 +1226,9 @@ function renderCuentas() {
 }
 
 function renderAsesores() {
-  if (cargandoInicial) {
+  if (cargandoInicial || cargandoCuentas) {
+    const totalAsesores = $("#totalAsesores");
+    if (totalAsesores) totalAsesores.textContent = "...";
     renderLoaderAsesores();
     renderPaginacionAsesores();
     return;
@@ -1201,8 +1372,8 @@ function renderPaginacionAsesores() {
   const items = $("#asesoresPaginacionItems");
   if (!info || !items) return;
 
-  if (cargandoInicial) {
-    info.textContent = "Cargando asesores...";
+  if (cargandoInicial || cargandoCuentas) {
+    info.textContent = "Actualizando asesores...";
     items.innerHTML = "";
     return;
   }
@@ -1507,6 +1678,15 @@ async function cargarCuentas() {
     paginacion = data.paginacion || paginacion;
     paginaActual = paginacion.pagina;
 
+    if (Array.isArray(data.asesores)) {
+      sincronizarAsesoresDesdeBackend(data.asesores);
+    }
+
+    if (data.filtros) {
+      filtrosBackend = data.filtros;
+      actualizarFiltrosDependientes(filtrosBackend, true);
+    }
+
     if (data.tablaSeleccionada?.id_table && $("#filtroCartera").value === "") {
       $("#filtroCartera").value = String(data.tablaSeleccionada.id_table);
     }
@@ -1569,18 +1749,7 @@ async function cargarDatosIniciales() {
     if (data.tablaSeleccionada?.id_table) {
       $("#filtroCartera").value = String(data.tablaSeleccionada.id_table);
     }
-    setSelectOptions(
-      $("#filtroDistrito"),
-      filtrosBackend.distritos || [],
-      "Todos",
-    );
-    setSelectOptions(
-      $("#filtroSegmento"),
-      filtrosBackend.segmentos || [],
-      "Todos",
-    );
-    setSelectOptions($("#filtroEstado"), filtrosBackend.estados || [], "Todos");
-    setSelectOptions($("#filtroPago"), filtrosBackend.pagos || [], "Todos");
+    actualizarFiltrosDependientes(filtrosBackend, false);
 
     $("#filtroFecha").disabled = false;
     $("#filtroFechaHasta").disabled = false;
@@ -1624,9 +1793,10 @@ async function cargarDatosIniciales() {
 
 async function recargarDespuesDeAsignar() {
   const dataInicial = await apiGet("inicial", obtenerParametrosCuentas());
-  asesores = dataInicial.asesores || [];
+  sincronizarAsesoresDesdeBackend(dataInicial.asesores || []);
   cuentas = dataInicial.cuentas || [];
   filtrosBackend = dataInicial.filtros || filtrosBackend;
+  actualizarFiltrosDependientes(filtrosBackend, true);
   paginacion = dataInicial.paginacion || paginacion;
   paginaActual = paginacion.pagina;
 
@@ -1973,12 +2143,23 @@ document.addEventListener("click", (event) => {
   "#filtroEstado",
   "#filtroPago",
 ].forEach((selector) => {
-  $(selector).addEventListener("change", () => {
+  const elemento = $(selector);
+  if (!elemento) return;
+  elemento.addEventListener("change", () => {
     const fechaDesde = $("#filtroFecha").value;
     const fechaHasta = $("#filtroFechaHasta").value;
 
     if (fechaDesde && fechaHasta && fechaDesde > fechaHasta) {
       $("#filtroFechaHasta").value = fechaDesde;
+    }
+
+    if (selector === "#filtroCartera") {
+      asesorSeleccionadoId = null;
+      asesorPaginaActual = 1;
+      $("#filtroDistrito").value = "";
+      $("#filtroSegmento").value = "";
+      $("#filtroEstado").value = "";
+      if ($("#filtroPago")) $("#filtroPago").value = "";
     }
 
     cuentasSeleccionadas = [];
