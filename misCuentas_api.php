@@ -184,6 +184,24 @@ function query_all(mysqli $mysqli, string $sql, string $types = '', array $param
     return $rows;
 }
 
+
+function query_execute(mysqli $mysqli, string $sql, string $types = '', array $params = []): int
+{
+    $stmt = $mysqli->prepare($sql);
+    if (!$stmt) {
+        throw new Exception('Error preparando consulta: ' . $mysqli->error);
+    }
+
+    if ($types !== '') {
+        $stmt->bind_param($types, ...$params);
+    }
+
+    $stmt->execute();
+    $affectedRows = (int)$stmt->affected_rows;
+    $stmt->close();
+    return $affectedRows;
+}
+
 function obtener_id_usuario(): int
 {
     $id = (int)($_GET['id_usuario'] ?? $_POST['id_usuario'] ?? 0);
@@ -804,6 +822,75 @@ function validar_asignaciones_asesor(mysqli $mysqli, int $idAsesor, array $idsAs
     return array_values(array_filter($idsAsignacion, fn($id) => isset($setValidas[$id])));
 }
 
+
+function validar_ids_asignaciones_en_vivo(mysqli $mysqli): void
+{
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        responder_json(['ok' => false, 'message' => 'JSON inválido.'], 400);
+    }
+
+    $idAsesor = (int)($input['id_usuario'] ?? $_SESSION['id_mis_cuentas'] ?? $_SESSION['id'] ?? 0);
+    $fechaRuta = limpiar_texto($input['fechaRuta'] ?? date('Y-m-d'));
+    $idsOriginales = $input['idsAsignacion'] ?? [];
+
+    if ($idAsesor <= 0) {
+        responder_json(['ok' => false, 'message' => 'Asesor inválido.'], 400);
+    }
+
+    try {
+        $fechaRuta = validar_fecha_ruta_diaria($fechaRuta);
+    } catch (Throwable $e) {
+        responder_json(['ok' => false, 'message' => $e->getMessage()], 400);
+    }
+
+    $idsNormalizados = array_values(array_unique(array_filter(array_map('intval', is_array($idsOriginales) ? $idsOriginales : []), fn($id) => $id > 0)));
+    if (!$idsNormalizados) {
+        responder_json([
+            'ok' => true,
+            'ids_validos' => [],
+            'ids_invalidos' => [],
+            'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $fechaRuta),
+            'resumen_pendientes' => consultar_resumen_pendientes($mysqli, $idAsesor)
+        ]);
+    }
+
+    $placeholders = implode(',', array_fill(0, count($idsNormalizados), '?'));
+    $types = str_repeat('i', count($idsNormalizados) + 1);
+    $params = array_merge([$idAsesor], $idsNormalizados);
+
+    $rows = query_all($mysqli, "
+        SELECT id_asignacion
+        FROM geocampo_asignacion
+        WHERE activo = 1
+          AND id_asesor = ?
+          AND id_asignacion IN ({$placeholders})
+    ", $types, $params);
+
+    $setValidas = [];
+    foreach ($rows as $row) {
+        $setValidas[(int)$row['id_asignacion']] = true;
+    }
+
+    $idsValidos = [];
+    $idsInvalidos = [];
+    foreach ($idsNormalizados as $idAsignacion) {
+        if (isset($setValidas[$idAsignacion])) {
+            $idsValidos[] = $idAsignacion;
+        } else {
+            $idsInvalidos[] = $idAsignacion;
+        }
+    }
+
+    responder_json([
+        'ok' => true,
+        'ids_validos' => $idsValidos,
+        'ids_invalidos' => $idsInvalidos,
+        'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $fechaRuta),
+        'resumen_pendientes' => consultar_resumen_pendientes($mysqli, $idAsesor)
+    ]);
+}
+
 function crear_hoja_ruta(mysqli $mysqli): void
 {
     // Compatibilidad con la acción antigua. La creación actual trabaja por semana.
@@ -851,11 +938,18 @@ function consultar_ruta_dia(mysqli $mysqli, int $idAsesor, string $fechaRuta): a
 
     $idHojaRuta = (int)$ruta['id_hoja_ruta'];
     $detalles = query_all($mysqli, "
-        SELECT id_asignacion, orden_visita
-        FROM geocampo_hoja_ruta_detalle
-        WHERE id_hoja_ruta = ?
-        ORDER BY COALESCE(orden_visita, 999999), id_detalle
-    ", 'i', [$idHojaRuta]);
+        SELECT d.id_asignacion, d.orden_visita
+        FROM geocampo_hoja_ruta_detalle d
+        INNER JOIN geocampo_asignacion ga
+            ON ga.id_asignacion = d.id_asignacion
+           AND ga.activo = 1
+           AND ga.id_asesor = ?
+        LEFT JOIN geocampo_estado_visita ev
+            ON ev.id_estado_visita = d.id_estado_visita
+        WHERE d.id_hoja_ruta = ?
+          AND COALESCE(ev.codigo, 'AGENDADO') <> 'CANCELADO'
+        ORDER BY COALESCE(d.orden_visita, 999999), d.id_detalle
+    ", 'ii', [$idAsesor, $idHojaRuta]);
 
     $ids = array_values(array_unique(array_map(fn($r) => (int)$r['id_asignacion'], $detalles)));
     if (!$ids) {
@@ -903,10 +997,12 @@ function consultar_ruta_dia(mysqli $mysqli, int $idAsesor, string $fechaRuta): a
         }
     }
 
+    $idsValidosRuta = array_values(array_map(fn($cuenta) => (int)$cuenta['id_asignacion'], $cuentasOrdenadas));
+
     return [
         'existe' => true,
         'id_hoja_ruta' => $idHojaRuta,
-        'ids' => $ids,
+        'ids' => $idsValidosRuta,
         'cuentas' => $cuentasOrdenadas,
         'tipo_ruta' => 'SEMANAL',
         'fecha_inicio_semana' => $semana['fecha_inicio_semana'],
@@ -1052,6 +1148,42 @@ function crear_o_actualizar_hoja_ruta(mysqli $mysqli): void
             $detallePorAsignacion[(int)$detalle['id_asignacion']] = $detalle;
         }
 
+        $setIdsValidos = array_flip($idsValidos);
+        $idEstadoVisitaCancelado = obtener_id_catalogo($mysqli, 'geocampo_estado_visita', 'id_estado_visita', 'CANCELADO');
+        $detallesCancelar = [];
+        foreach ($detallesActuales as $detalle) {
+            $idAsignacionDetalle = (int)$detalle['id_asignacion'];
+            $estadoDetalle = strtoupper((string)($detalle['estado_codigo'] ?? ''));
+            if (!isset($setIdsValidos[$idAsignacionDetalle]) && $estadoDetalle !== 'VISITADO') {
+                $detallesCancelar[] = (int)$detalle['id_detalle'];
+            }
+        }
+
+        if ($detallesCancelar) {
+            $placeholdersCancelar = implode(',', array_fill(0, count($detallesCancelar), '?'));
+            $typesCancelar = 'i' . str_repeat('i', count($detallesCancelar));
+            $paramsCancelar = array_merge([$idEstadoVisitaCancelado], $detallesCancelar);
+            query_execute($mysqli, "
+                UPDATE geocampo_hoja_ruta_detalle
+                SET id_estado_visita = ?
+                WHERE id_detalle IN ({$placeholdersCancelar})
+            ", $typesCancelar, $paramsCancelar);
+
+            foreach ($detallesCancelar as $idDetalleCancelado) {
+                registrar_historial_ruta(
+                    $mysqli,
+                    $idHojaRuta,
+                    $idDetalleCancelado,
+                    null,
+                    'CANCELACION_DETALLE',
+                    null,
+                    'CANCELADO',
+                    'Detalle retirado al actualizar la ruta semanal desde Mis Cuentas.',
+                    $idAsesor
+                );
+            }
+        }
+
         $pendientesPorAsignacion = obtener_detalles_pendientes_por_asignacion($mysqli, $idAsesor, $idsValidos);
         $reprogramadosAgregados = 0;
 
@@ -1072,7 +1204,7 @@ function crear_o_actualizar_hoja_ruta(mysqli $mysqli): void
         ");
         $stmtUpdateDetalle = $mysqli->prepare("
             UPDATE geocampo_hoja_ruta_detalle
-            SET orden_visita = ?, fecha_agendada = ?
+            SET orden_visita = ?, fecha_agendada = ?, id_estado_visita = ?
             WHERE id_detalle = ?
         ");
         $stmtUpdateAsignacion = $mysqli->prepare("
@@ -1085,7 +1217,11 @@ function crear_o_actualizar_hoja_ruta(mysqli $mysqli): void
         foreach ($idsValidos as $idAsignacion) {
             if (isset($detallePorAsignacion[$idAsignacion])) {
                 $idDetalle = (int)$detallePorAsignacion[$idAsignacion]['id_detalle'];
-                $stmtUpdateDetalle->bind_param('isi', $orden, $fechaAgendada, $idDetalle);
+                $estadoDetalleActual = strtoupper((string)($detallePorAsignacion[$idAsignacion]['estado_codigo'] ?? ''));
+                $idEstadoVisitaDetalle = $estadoDetalleActual === 'VISITADO'
+                    ? (int)$detallePorAsignacion[$idAsignacion]['id_estado_visita']
+                    : $idEstadoVisitaAgendado;
+                $stmtUpdateDetalle->bind_param('isii', $orden, $fechaAgendada, $idEstadoVisitaDetalle, $idDetalle);
                 $stmtUpdateDetalle->execute();
             } else {
                 $pendienteOrigen = $pendientesPorAsignacion[$idAsignacion] ?? null;
@@ -1155,7 +1291,9 @@ function crear_o_actualizar_hoja_ruta(mysqli $mysqli): void
             'message' => $accion === 'actualizada' ? 'Hoja de ruta actualizada correctamente.' : 'Hoja de ruta creada correctamente.',
             'accion' => $accion,
             'id_hoja_ruta' => $idHojaRuta,
-            'paradas' => count($idsValidos)
+            'paradas' => count($idsValidos),
+            'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $fechaRutaBase),
+            'resumen_pendientes' => consultar_resumen_pendientes($mysqli, $idAsesor)
         ]);
     } catch (Throwable $e) {
         $mysqli->rollback();
@@ -1311,6 +1449,10 @@ try {
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'crear_ruta') {
         crear_hoja_ruta($mysqli);
+    }
+
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'validar_ids_asignaciones') {
+        validar_ids_asignaciones_en_vivo($mysqli);
     }
 
     if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'guardar_o_actualizar_ruta') {

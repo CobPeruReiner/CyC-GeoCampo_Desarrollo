@@ -124,7 +124,7 @@ function asegurarModalConfirmacion() {
         </div>
         <button id="modalConfirmacionCerrar" type="button" class="w-8 h-8 rounded-lg hover:bg-gray-100 flex items-center justify-center text-gray-500 cursor-pointer">
           <i data-lucide="x" class="w-4 h-4"></i>
-        </div>
+        </button>
       </div>
       <div id="modalConfirmacionContenido" class="px-5 py-4 max-h-[60vh] overflow-y-auto text-sm text-gray-700"></div>
       <div class="px-5 py-4 bg-gray-50 border-t border-gray-100 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">

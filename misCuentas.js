@@ -382,17 +382,43 @@ function fusionarCuentaRuta(cuentaActualizada) {
     };
 }
 
-function aplicarRutaDia(rutaDia, forzar = false) {
+function idsAsignacionUnicos(ids) {
+  return Array.from(
+    new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((id) => Number(id))
+        .filter((id) => id > 0),
+    ),
+  );
+}
+
+function aplicarRutaDia(rutaDia, forzar = false, actualizarSeleccion = true) {
   if (!rutaDia) return;
+
+  const cuentasRuta = Array.isArray(rutaDia.cuentas) ? rutaDia.cuentas : [];
+  const idsDesdeCuentas = cuentasRuta
+    .map((cuenta) => Number(cuenta.id_asignacion))
+    .filter((id) => id > 0);
+  const idsDesdeApi = Array.isArray(rutaDia.ids)
+    ? rutaDia.ids.map(Number).filter((id) => id > 0)
+    : [];
+
+  // Si el API trae IDs antiguos de una ruta, pero esas cuentas ya no vienen en
+  // ruta_dia.cuentas porque fueron desasignadas/reasignadas o están inactivas,
+  // la vista debe trabajar con las cuentas válidas realmente retornadas.
+  const idsRuta = idsAsignacionUnicos(
+    idsDesdeCuentas.length > 0 ? idsDesdeCuentas : idsDesdeApi,
+  );
+
   estado.rutaDia = {
     existe: Boolean(rutaDia.existe),
     id_hoja_ruta: rutaDia.id_hoja_ruta || null,
-    ids: Array.isArray(rutaDia.ids)
-      ? rutaDia.ids.map(Number).filter((id) => id > 0)
-      : [],
-    cuentas: Array.isArray(rutaDia.cuentas) ? rutaDia.cuentas : [],
+    ids: idsRuta,
+    cuentas: cuentasRuta,
   };
   estado.rutaCuentas = estado.rutaDia.cuentas;
+
+  if (!actualizarSeleccion) return;
 
   if (forzar || estado.seleccionadas.length === 0) {
     estado.seleccionadas = [...estado.rutaDia.ids];
@@ -401,6 +427,58 @@ function aplicarRutaDia(rutaDia, forzar = false) {
       if (!estado.seleccionadas.includes(id)) estado.seleccionadas.push(id);
     });
   }
+}
+
+
+function esErrorAsignacionDesactualizada(error) {
+  const texto = String(error?.message || error || "").toLowerCase();
+  return (
+    texto.includes("no pertenecen al asesor") ||
+    texto.includes("ya no están activas") ||
+    texto.includes("ya no estan activas")
+  );
+}
+
+async function depurarSeleccionConServidor() {
+  const idsActuales = idsAsignacionUnicos(estado.seleccionadas);
+  if (idsActuales.length === 0) {
+    return { idsInvalidos: [], huboCambios: false };
+  }
+
+  const data = await apiPost("validar_ids_asignaciones", {
+    idsAsignacion: idsActuales,
+    fechaRuta: $("#filtroFechaRuta")?.value || hoyISO(),
+  });
+
+  const idsValidos = idsAsignacionUnicos(data.ids_validos || []);
+  const setValidos = new Set(idsValidos);
+  const idsInvalidos = idsAsignacionUnicos(
+    data.ids_invalidos || idsActuales.filter((id) => !setValidos.has(id)),
+  );
+  const seleccionDepurada = idsActuales.filter((id) => setValidos.has(id));
+  const huboCambios =
+    idsInvalidos.length > 0 ||
+    seleccionDepurada.length !== idsActuales.length ||
+    seleccionDepurada.some((id, index) => id !== idsActuales[index]);
+
+  estado.seleccionadas = seleccionDepurada;
+
+  // Refresca la ruta real del backend sin volver a mezclar IDs antiguos en la selección actual.
+  if (data.ruta_dia) aplicarRutaDia(data.ruta_dia, false, false);
+  if (data.resumen_pendientes) aplicarResumenPendientes(data.resumen_pendientes);
+
+  return { idsInvalidos, huboCambios };
+}
+
+async function manejarErrorRutaDesactualizada(error) {
+  if (!esErrorAsignacionDesactualizada(error)) return false;
+  await cargarCuentas(true);
+  mostrarAviso(
+    "warning",
+    "Ruta actualizada",
+    "Se retiraron de la vista las cuentas que ya no pertenecen al asesor. Vuelve a revisar la ruta y guarda nuevamente.",
+  );
+  return true;
 }
 
 function aplicarResumenPendientes(resumen) {
@@ -972,6 +1050,13 @@ async function cargarCuentas(forzarRutaDia = false) {
     estado.paginacion = data.paginacion;
     aplicarRutaDia(data.ruta_dia, forzarRutaDia);
     aplicarResumenPendientes(data.resumen_pendientes);
+    if (!forzarRutaDia && estado.seleccionadas.length > 0) {
+      try {
+        await depurarSeleccionConServidor();
+      } catch (_) {
+        // Si la depuración falla, no bloquea la carga; el guardado final volverá a validar.
+      }
+    }
   } catch (error) {
     mostrarAviso("error", "No se pudo cargar", error.message);
   } finally {
@@ -1069,6 +1154,16 @@ async function crearRuta() {
     $("#btnCrearRuta").innerHTML =
       `<i data-lucide="loader-circle" class="w-4 h-4 animate-spin"></i> Guardando...`;
     lucide.createIcons();
+    const depuracion = await depurarSeleccionConServidor();
+    if (estado.seleccionadas.length === 0) {
+      mostrarAviso(
+        "warning",
+        "Ruta actualizada",
+        "No quedan cuentas vigentes para guardar. La vista fue sincronizada con el servidor.",
+      );
+      return;
+    }
+
     const idsRuta = cuentasSeleccionadasOrdenadasParaVista().map(
       (cuenta) => cuenta.id_asignacion,
     );
@@ -1085,11 +1180,15 @@ async function crearRuta() {
     mostrarAviso(
       "success",
       "Hoja de ruta guardada",
-      "La ruta se guardó correctamente.",
+      depuracion.idsInvalidos.length > 0
+        ? "La ruta se guardó con las cuentas vigentes. Se retiraron cuentas que ya no pertenecían al asesor."
+        : "La ruta se guardó correctamente.",
     );
     await cargarCuentas(true);
   } catch (error) {
-    mostrarAviso("error", "No se pudo guardar", error.message);
+    if (!(await manejarErrorRutaDesactualizada(error))) {
+      mostrarAviso("error", "No se pudo guardar", error.message);
+    }
   } finally {
     estado.guardando = false;
     render();
@@ -1782,6 +1881,16 @@ async function guardarRutaDesdeMapa() {
     btn.innerHTML = `<i data-lucide="loader-circle" class="w-3.5 h-3.5 animate-spin"></i> Guardando...`;
     lucide.createIcons();
 
+    const depuracion = await depurarSeleccionConServidor();
+    if (estado.seleccionadas.length === 0) {
+      mostrarAviso(
+        "warning",
+        "Ruta actualizada",
+        "No quedan cuentas vigentes para guardar. La vista fue sincronizada con el servidor.",
+      );
+      return;
+    }
+
     const idsRuta = cuentasOrdenadasParaMapa().map(
       (cuenta) => cuenta.id_asignacion,
     );
@@ -1794,12 +1903,16 @@ async function guardarRutaDesdeMapa() {
     mostrarAviso(
       "success",
       "Hoja de ruta guardada",
-      "La ruta se guardó correctamente.",
+      depuracion.idsInvalidos.length > 0
+        ? "La ruta se guardó con las cuentas vigentes. Se retiraron cuentas que ya no pertenecían al asesor."
+        : "La ruta se guardó correctamente.",
     );
     cerrarModalMapaCompleto();
     await cargarCuentas(true);
   } catch (error) {
-    mostrarAviso("error", "No se pudo guardar", error.message);
+    if (!(await manejarErrorRutaDesactualizada(error))) {
+      mostrarAviso("error", "No se pudo guardar", error.message);
+    }
   } finally {
     estado.guardando = false;
     const btn = $("#btnGuardarMapaRuta");
