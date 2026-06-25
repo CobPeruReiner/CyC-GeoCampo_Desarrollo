@@ -70,7 +70,7 @@ if (empty($_SESSION['id'])) {
 
 <body class="bg-[#F4F6F8] text-gray-900">
 
-  <main class="max-w-[1700px] mx-auto px-6 py-8">
+  <main class="mx-auto px-6 py-8">
 
     <!-- Header superior -->
     <header class="corporate-header h-[82px] flex items-center px-6 mb-6">
@@ -364,7 +364,7 @@ if (empty($_SESSION['id'])) {
     window.initMap = window.initMap || function() {};
   </script>
   <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyCGFBIf_6mCinwpqWw2Q-lHwNmK6u2iMhE&libraries=places,marker&callback=initMap"></script>
-  <script src="asignarCuenta.js?v=20260622_supervisor_direccion_ruta_v1"></script>
+  <script src="asignarCuenta.js?v=20260625_feedback_21_22_v1"></script>
 </body>
 
 </html>

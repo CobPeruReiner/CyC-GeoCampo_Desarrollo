@@ -544,7 +544,7 @@ function normalizar_cuenta(array $row): array
         'ubigeo_original' => $ubigeoOriginal,
         'importe' => (float)($row['importe'] ?? 0),
         'tiene_pago' => (int)($row['tiene_pago'] ?? 0),
-        'estado_pago' => ((int)($row['tiene_pago'] ?? 0) === 1) ? 'Pago' : 'No pago',
+        'estado_pago' => ((int)($row['tiene_pago'] ?? 0) === 1) ? 'Pago' : 'NP',
         'fecha_pago' => limpiar_texto($row['fecha_pago'] ?? ''),
         'monto_pago' => (float)($row['monto_pago'] ?? 0),
         'direccion_original' => $direccionOriginal !== '' ? $direccionOriginal : 'Sin dirección registrada',

@@ -33,6 +33,17 @@ function limpiar_texto($valor): string
     return trim((string)($valor ?? ''));
 }
 
+function debug_tiempos_activo(): bool
+{
+    return isset($_GET['debug']) && (string)$_GET['debug'] === '1';
+}
+
+function filtros_requieren_direcciones(array $filtros): bool
+{
+    return limpiar_texto($filtros['distrito'] ?? '') !== ''
+        || limpiar_texto($filtros['busqueda'] ?? '') !== '';
+}
+
 function obtener_id_catalogo(mysqli $mysqli, string $tabla, string $campoId, string $codigo): int
 {
     $sql = "SELECT {$campoId} AS id FROM {$tabla} WHERE codigo = ? AND activo = 1 LIMIT 1";
@@ -526,7 +537,8 @@ function pago_exists_expr(mysqli $mysqli, array $ctx, array $periodo): string
         WHERE pg.IDCARTERA = {$idCartera}
           AND pg.IDENTIFICADOR = c.identificador
           AND COALESCE(pg.IDESTADO, 0) = 0
-          AND DATE(pg.FECHAPAG) BETWEEN '{$fechaInicio}' AND '{$fechaFin}'
+          AND pg.FECHAPAG >= '{$fechaInicio}'
+          AND pg.FECHAPAG < DATE_ADD('{$fechaFin}', INTERVAL 1 DAY)
         LIMIT 1
     )";
 }
@@ -543,7 +555,8 @@ function pago_fecha_expr(mysqli $mysqli, array $ctx, array $periodo): string
         WHERE pg.IDCARTERA = {$idCartera}
           AND pg.IDENTIFICADOR = c.identificador
           AND COALESCE(pg.IDESTADO, 0) = 0
-          AND DATE(pg.FECHAPAG) BETWEEN '{$fechaInicio}' AND '{$fechaFin}'
+          AND pg.FECHAPAG >= '{$fechaInicio}'
+          AND pg.FECHAPAG < DATE_ADD('{$fechaFin}', INTERVAL 1 DAY)
     )";
 }
 
@@ -559,7 +572,8 @@ function pago_monto_expr(mysqli $mysqli, array $ctx, array $periodo): string
         WHERE pg.IDCARTERA = {$idCartera}
           AND pg.IDENTIFICADOR = c.identificador
           AND COALESCE(pg.IDESTADO, 0) = 0
-          AND DATE(pg.FECHAPAG) BETWEEN '{$fechaInicio}' AND '{$fechaFin}'
+          AND pg.FECHAPAG >= '{$fechaInicio}'
+          AND pg.FECHAPAG < DATE_ADD('{$fechaFin}', INTERVAL 1 DAY)
     )";
 }
 
@@ -618,6 +632,100 @@ function validar_asignacion_supervisor(mysqli $mysqli, int $idAsignacion, array 
     }
 
     return $rows[0];
+}
+
+function validar_cuenta_supervisor(mysqli $mysqli, int $idCuentaCampo, array $ctx): array
+{
+    $idCartera = (int)($ctx['id_cartera'] ?? 0);
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $carteraExpr = columna_cartera_cuenta_expr($mysqli, $ctx);
+
+    if ($idCuentaCampo <= 0 || $idCartera <= 0) {
+        throw new Exception('Datos de cuenta inválidos.');
+    }
+
+    $rows = query_all($mysqli, "
+        SELECT c.id
+        FROM {$tablaCuentas} c
+        WHERE c.id = ?
+          AND {$carteraExpr} = ?
+        LIMIT 1
+    ", 'ii', [$idCuentaCampo, $idCartera]);
+
+    if (!$rows) {
+        throw new Exception('La cuenta no pertenece a la cartera seleccionada.');
+    }
+
+    return $rows[0];
+}
+
+function direccion_corregida_soporta_cuenta(mysqli $mysqli): bool
+{
+    return columna_fisica_existe($mysqli, 'geocampo_direccion_corregida', 'id_cuenta_campo')
+        && columna_fisica_existe($mysqli, 'geocampo_direccion_corregida', 'id_table')
+        && columna_fisica_existe($mysqli, 'geocampo_direccion_corregida', 'id_cartera');
+}
+
+function construir_join_direccion_corregida(mysqli $mysqli, int $idTable, int $idCartera): string
+{
+    if (direccion_corregida_soporta_cuenta($mysqli)) {
+        return "
+        LEFT JOIN geocampo_direccion_corregida dc
+            ON dc.id_direccion_corregida = (
+                SELECT dc2.id_direccion_corregida
+                FROM geocampo_direccion_corregida dc2
+                WHERE (
+                    (ga.id_asignacion IS NOT NULL AND dc2.id_asignacion = ga.id_asignacion)
+                    OR (
+                        dc2.id_cuenta_campo = c.id
+                        AND dc2.id_table = {$idTable}
+                        AND dc2.id_cartera = {$idCartera}
+                    )
+                )
+                ORDER BY dc2.id_direccion_corregida DESC
+                LIMIT 1
+            )";
+    }
+
+    return "
+        LEFT JOIN geocampo_direccion_corregida dc
+            ON dc.id_direccion_corregida = (
+                SELECT dc2.id_direccion_corregida
+                FROM geocampo_direccion_corregida dc2
+                WHERE dc2.id_asignacion = ga.id_asignacion
+                ORDER BY dc2.id_direccion_corregida DESC
+                LIMIT 1
+            )";
+}
+
+function abreviar_estado_asignacion(string $codigo): string
+{
+    $codigo = strtoupper(str_replace(' ', '_', trim($codigo)));
+    $mapa = [
+        'SIN_ASIGNAR' => 'SA',
+        'PENDIENTE' => 'PE',
+        'AGENDADO' => 'AG',
+        'VISITADO' => 'VI',
+        'NO_ENCONTRADO' => 'NE',
+        'REPROGRAMADO' => 'RP',
+        'CERRADO' => 'CE',
+        'ANULADO' => 'AN',
+    ];
+
+    return $mapa[$codigo] ?? substr($codigo, 0, 2) ?: '--';
+}
+
+function tooltip_estado_asignacion(string $codigo, string $descripcion = ''): string
+{
+    $codigo = strtoupper(str_replace(' ', '_', trim($codigo)));
+    $codigoLegible = $codigo !== '' ? str_replace('_', ' ', $codigo) : 'SIN ESTADO';
+    $descripcion = trim($descripcion);
+
+    if ($descripcion !== '' && strtoupper($descripcion) !== $codigoLegible) {
+        return '(' . $codigoLegible . ') ' . $descripcion;
+    }
+
+    return '(' . $codigoLegible . ')';
 }
 
 function normalizar_cuenta_ruta_supervisor(array $row): array
@@ -757,7 +865,7 @@ function normalizar_cuentas(array $cuentas): array
         $cuenta['importe'] = (float)($cuenta['importe'] ?? 0);
         $cuenta['tiene_pago'] = (int)($cuenta['tiene_pago'] ?? 0);
         $cuenta['monto_pago'] = (float)($cuenta['monto_pago'] ?? 0);
-        $cuenta['estado_pago'] = $cuenta['tiene_pago'] === 1 ? 'Pago' : 'No pago';
+        $cuenta['estado_pago'] = $cuenta['tiene_pago'] === 1 ? 'Pago' : 'NP';
         $cuenta['visitas_semana'] = (int)($cuenta['visitas_semana'] ?? 0);
         $cuenta['ultima_fecha_visita_semana'] = limpiar_texto($cuenta['ultima_fecha_visita_semana'] ?? '');
         $cuenta['latitud'] = (float)($cuenta['latitud'] ?? 0);
@@ -808,10 +916,13 @@ function normalizar_cuentas(array $cuentas): array
             $estadoCodigo = 'PENDIENTE';
             $estadoDescripcion = $estadoDescripcion ?: 'Registro asignado al asesor, pendiente de hoja de ruta';
         }
+        $estadoDescripcion = $estadoDescripcion ?: $estadoCodigo;
+        $cuenta['estado_codigo_completo'] = $estadoCodigo;
         $cuenta['estado_codigo'] = $estadoCodigo;
         $cuenta['estado_general'] = $estadoCodigo;
-        $cuenta['estado_descripcion'] = $estadoDescripcion ?: $estadoCodigo;
-        $cuenta['estado_tooltip'] = $cuenta['estado_descripcion'];
+        $cuenta['estado_abreviado'] = abreviar_estado_asignacion($estadoCodigo);
+        $cuenta['estado_descripcion'] = $estadoDescripcion;
+        $cuenta['estado_tooltip'] = tooltip_estado_asignacion($estadoCodigo, $estadoDescripcion);
         $cuenta['estado'] = $cuenta['estado_descripcion'];
     }
     unset($cuenta);
@@ -821,6 +932,7 @@ function normalizar_cuentas(array $cuentas): array
 
 function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina, int $porPagina, array $ctx): array
 {
+    $tiempoInicio = microtime(true);
     $pagina = max(1, $pagina);
     $porPagina = in_array($porPagina, [5, 10, 15, 25, 50, 100], true) ? $porPagina : 10;
     $offset = ($pagina - 1) * $porPagina;
@@ -842,6 +954,8 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
     $semanaActual = obtener_rango_semana(fecha_hoy_peru());
     $inicioSemana = $mysqli->real_escape_string($semanaActual['fecha_inicio_semana']);
     $finSemana = $mysqli->real_escape_string($semanaActual['fecha_fin_semana']);
+    $joinDireccionCorregida = construir_join_direccion_corregida($mysqli, $idTable, $idCarteraCtx);
+    $requiereDireccionesEnCount = filtros_requieren_direcciones($filtros);
 
     $from = "
         FROM {$tablaCuentas} c
@@ -860,14 +974,7 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             {$direccionesSql}
         ) d
             ON d.DOC = c.documento
-        LEFT JOIN geocampo_direccion_corregida dc
-            ON dc.id_direccion_corregida = (
-                SELECT dc2.id_direccion_corregida
-                FROM geocampo_direccion_corregida dc2
-                WHERE dc2.id_asignacion = ga.id_asignacion
-                ORDER BY dc2.id_direccion_corregida DESC
-                LIMIT 1
-            )
+        {$joinDireccionCorregida}
         LEFT JOIN (
             SELECT
                 g.IDENTIFICADOR,
@@ -875,13 +982,39 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
                 MAX(g.FECHA) AS ultima_fecha_visita_semana
             FROM GEOCAMPO g
             WHERE g.IDCARTERA = {$idCarteraCtx}
-              AND DATE(g.FECHA) BETWEEN '{$inicioSemana}' AND '{$finSemana}'
+              AND g.FECHA >= '{$inicioSemana}'
+              AND g.FECHA < DATE_ADD('{$finSemana}', INTERVAL 1 DAY)
             GROUP BY g.IDENTIFICADOR
         ) vgs
             ON vgs.IDENTIFICADOR = c.identificador
     ";
 
-    $totalRows = query_all($mysqli, "SELECT COUNT(*) AS total {$from} {$where}", $types, $params);
+    // COUNT optimizado: no arrastra direcciones, correcciones ni visitas si el filtro no lo necesita.
+    // Esto reduce el tiempo al cambiar a Confianza Campo sin cambiar la forma de mostrar direcciones.
+    $joinDireccionesCount = $requiereDireccionesEnCount ? "
+        LEFT JOIN (
+            {$direccionesSql}
+        ) d
+            ON d.DOC = c.documento
+    " : "";
+
+    $fromCount = "
+        FROM {$tablaCuentas} c
+        LEFT JOIN cartera car
+            ON car.id = {$carteraExpr}
+        LEFT JOIN geocampo_asignacion ga
+            ON ga.id_cuenta_campo = c.id
+           AND ga.id_table = {$idTable}
+           AND ga.id_cartera = {$idCarteraCtx}
+           AND ga.activo = 1
+        LEFT JOIN personal pa
+            ON pa.IDPERSONAL = ga.id_asesor
+        {$joinDireccionesCount}
+    ";
+
+    $tiempoAntesCount = microtime(true);
+    $totalRows = query_all($mysqli, "SELECT COUNT(*) AS total {$fromCount} {$where}", $types, $params);
+    $tiempoDespuesCount = microtime(true);
     $total = (int)($totalRows[0]['total'] ?? 0);
     $totalPaginas = max(1, (int)ceil($total / $porPagina));
 
@@ -937,9 +1070,11 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
         LIMIT ? OFFSET ?
     ";
 
+    $tiempoAntesSelect = microtime(true);
     $cuentas = query_all($mysqli, $sql, $types . 'ii', array_merge($params, [$porPagina, $offset]));
+    $tiempoDespuesSelect = microtime(true);
 
-    return [
+    $respuesta = [
         'cuentas' => normalizar_cuentas($cuentas),
         'paginacion' => [
             'pagina' => $pagina,
@@ -950,6 +1085,21 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             'hasta' => min($offset + $porPagina, $total),
         ]
     ];
+
+    if (debug_tiempos_activo()) {
+        $respuesta['debug'] = [
+            'count_usa_direcciones' => $requiereDireccionesEnCount,
+            'tiempo_count_ms' => round(($tiempoDespuesCount - $tiempoAntesCount) * 1000, 2),
+            'tiempo_select_ms' => round(($tiempoDespuesSelect - $tiempoAntesSelect) * 1000, 2),
+            'tiempo_total_consultar_cuentas_ms' => round(($tiempoDespuesSelect - $tiempoInicio) * 1000, 2),
+            'fuente_direcciones' => $fuenteDirecciones,
+            'tabla_cuentas' => $tablaCuentas,
+            'id_table' => $idTable,
+            'id_cartera' => $idCarteraCtx
+        ];
+    }
+
+    return $respuesta;
 }
 
 function cargar_asesores(mysqli $mysqli, array $ctx): array
@@ -1009,7 +1159,8 @@ function cargar_asesores(mysqli $mysqli, array $ctx): array
                 FROM GEOCAMPO g_hoy
                 WHERE g_hoy.IDPERSONAL = p.IDPERSONAL
                   AND g_hoy.IDCARTERA = {$idCarteraCtx}
-                  AND DATE(g_hoy.FECHA) = CURDATE()
+                  AND g_hoy.FECHA >= CURDATE()
+                  AND g_hoy.FECHA < DATE_ADD(CURDATE(), INTERVAL 1 DAY)
             ) AS visitas_hoy,
 
             (
@@ -1017,8 +1168,8 @@ function cargar_asesores(mysqli $mysqli, array $ctx): array
                 FROM GEOCAMPO g_sem
                 WHERE g_sem.IDPERSONAL = p.IDPERSONAL
                   AND g_sem.IDCARTERA = {$idCarteraCtx}
-                  AND DATE(g_sem.FECHA) BETWEEN DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
-                                          AND DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 6 DAY)
+                  AND g_sem.FECHA >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+                  AND g_sem.FECHA < DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 7 DAY)
             ) AS visitas_semana
         FROM personal p
         WHERE COALESCE(p.IDESTADO, 1) = 1
@@ -1060,19 +1211,38 @@ function cargar_filtros(mysqli $mysqli, array $ctx): array
 {
     $tablaCuentas = nombre_tabla_sql($ctx);
     $tablasCampo = obtener_tablas_campo_disponibles($mysqli);
-    $fuenteDirecciones = fuente_direcciones_campo($ctx);
-    $direccionesDistritoSql = subquery_direcciones_campo($fuenteDirecciones, 'DOC, DISTRITO');
+    $fuenteDirecciones = preg_replace('/[^0-9]/', '', fuente_direcciones_campo($ctx));
+    if ($fuenteDirecciones === '') {
+        $fuenteDirecciones = '11';
+    }
 
+    // Conservador: los filtros de distrito siguen saliendo de direcciones.
+    // Optimización: primero se limita al universo de documentos de la cartera seleccionada,
+    // para no materializar direcciones de clientes que no pertenecen a la cartera.
     $distritos = query_all($mysqli, "
-        SELECT DISTINCT d.DISTRITO AS valor
-        FROM {$tablaCuentas} c
-        INNER JOIN (
-            {$direccionesDistritoSql}
-        ) d
-            ON d.DOC = c.documento
-        WHERE d.DISTRITO IS NOT NULL
-          AND TRIM(d.DISTRITO) <> ''
-        ORDER BY d.DISTRITO
+        SELECT DISTINCT x.DISTRITO AS valor
+        FROM (
+            SELECT
+                d.DOC,
+                d.DISTRITO,
+                ROW_NUMBER() OVER (
+                    PARTITION BY d.DOC
+                    ORDER BY d.FECHA_ACTUALIZACION DESC
+                ) AS rn
+            FROM {$tablaCuentas} c
+            INNER JOIN direcciones d
+                ON d.DOC = c.documento
+            WHERE d.DOC IS NOT NULL
+              AND d.DOC <> ''
+              AND d.FUENTE = '{$fuenteDirecciones}'
+              AND COALESCE(d.IDESTADO, 1) = 1
+              AND d.FECHA_ACTUALIZACION >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+              AND d.FECHA_ACTUALIZACION < DATE_ADD(DATE_FORMAT(CURDATE(), '%Y-%m-01'), INTERVAL 2 MONTH)
+        ) x
+        WHERE x.rn = 1
+          AND x.DISTRITO IS NOT NULL
+          AND TRIM(x.DISTRITO) <> ''
+        ORDER BY x.DISTRITO
     ");
 
     $segmentos = query_all($mysqli, "
@@ -1097,43 +1267,94 @@ function cargar_filtros(mysqli $mysqli, array $ctx): array
     ];
 }
 
+
 function cargar_inicial(mysqli $mysqli): void
 {
+    $tiempoInicio = microtime(true);
     $pagina = max(1, (int)($_GET['page'] ?? 1));
     $porPagina = max(1, (int)($_GET['perPage'] ?? 10));
     $filtros = obtener_filtros_desde_array($_GET);
     $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
-    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina, $ctx);
 
-    responder_json([
+    $t0 = microtime(true);
+    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina, $ctx);
+    $t1 = microtime(true);
+    $periodoPago = obtener_periodo_pago_actual($mysqli);
+    $t2 = microtime(true);
+    $asesores = cargar_asesores($mysqli, $ctx);
+    $t3 = microtime(true);
+    $filtrosCatalogo = cargar_filtros($mysqli, $ctx);
+    $t4 = microtime(true);
+
+    $respuesta = [
         'ok' => true,
         'tablaSeleccionada' => $ctx,
-        'periodoPago' => obtener_periodo_pago_actual($mysqli),
-        'asesores' => cargar_asesores($mysqli, $ctx),
-        'filtros' => cargar_filtros($mysqli, $ctx),
+        'periodoPago' => $periodoPago,
+        'asesores' => $asesores,
+        'filtros' => $filtrosCatalogo,
         'cuentas' => $resultadoCuentas['cuentas'],
         'paginacion' => $resultadoCuentas['paginacion']
-    ]);
+    ];
+
+    if (debug_tiempos_activo()) {
+        $respuesta['debug'] = [
+            'accion' => 'inicial',
+            'cuentas_ms' => round(($t1 - $t0) * 1000, 2),
+            'periodo_pago_ms' => round(($t2 - $t1) * 1000, 2),
+            'asesores_ms' => round(($t3 - $t2) * 1000, 2),
+            'filtros_ms' => round(($t4 - $t3) * 1000, 2),
+            'total_api_ms' => round(($t4 - $tiempoInicio) * 1000, 2),
+            'detalle_cuentas' => $resultadoCuentas['debug'] ?? null
+        ];
+    }
+
+    responder_json($respuesta);
 }
+
 
 function cargar_cuentas(mysqli $mysqli): void
 {
+    $tiempoInicio = microtime(true);
     $pagina = max(1, (int)($_GET['page'] ?? 1));
     $porPagina = max(1, (int)($_GET['perPage'] ?? 10));
     $filtros = obtener_filtros_desde_array($_GET);
     $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
-    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina, $ctx);
 
-    responder_json([
+    $t0 = microtime(true);
+    $resultadoCuentas = consultar_cuentas_paginadas($mysqli, $filtros, $pagina, $porPagina, $ctx);
+    $t1 = microtime(true);
+    $periodoPago = obtener_periodo_pago_actual($mysqli);
+    $t2 = microtime(true);
+    $asesores = cargar_asesores($mysqli, $ctx);
+    $t3 = microtime(true);
+    $filtrosCatalogo = cargar_filtros($mysqli, $ctx);
+    $t4 = microtime(true);
+
+    $respuesta = [
         'ok' => true,
         'tablaSeleccionada' => $ctx,
-        'periodoPago' => obtener_periodo_pago_actual($mysqli),
-        'asesores' => cargar_asesores($mysqli, $ctx),
-        'filtros' => cargar_filtros($mysqli, $ctx),
+        'periodoPago' => $periodoPago,
+        'asesores' => $asesores,
+        'filtros' => $filtrosCatalogo,
         'cuentas' => $resultadoCuentas['cuentas'],
         'paginacion' => $resultadoCuentas['paginacion']
-    ]);
+    ];
+
+    if (debug_tiempos_activo()) {
+        $respuesta['debug'] = [
+            'accion' => 'cuentas',
+            'cuentas_ms' => round(($t1 - $t0) * 1000, 2),
+            'periodo_pago_ms' => round(($t2 - $t1) * 1000, 2),
+            'asesores_ms' => round(($t3 - $t2) * 1000, 2),
+            'filtros_ms' => round(($t4 - $t3) * 1000, 2),
+            'total_api_ms' => round(($t4 - $tiempoInicio) * 1000, 2),
+            'detalle_cuentas' => $resultadoCuentas['debug'] ?? null
+        ];
+    }
+
+    responder_json($respuesta);
 }
+
 
 function obtener_ids_por_filtros(mysqli $mysqli, array $filtros, array $ctx): array
 {
@@ -1184,7 +1405,10 @@ function guardar_direccion_supervisor(mysqli $mysqli): void
 
     $idSupervisor = (int)($_SESSION['id'] ?? 0);
     $idAsignacion = (int)($input['id_asignacion'] ?? 0);
+    $idCuentaCampo = (int)($input['id_cuenta_campo'] ?? ($input['id_cuenta'] ?? 0));
     $ctx = obtener_contexto_cartera($mysqli, $input['cartera'] ?? '');
+    $idTable = (int)($ctx['id_table'] ?? 0);
+    $idCartera = (int)($ctx['id_cartera'] ?? 0);
 
     $direccionOriginal = limpiar_texto($input['direccion_original'] ?? '');
     $direccionSearch = limpiar_texto($input['direccion_search'] ?? '');
@@ -1196,7 +1420,7 @@ function guardar_direccion_supervisor(mysqli $mysqli): void
     $latitud = isset($input['latitud']) && $input['latitud'] !== '' ? (float)$input['latitud'] : null;
     $longitud = isset($input['longitud']) && $input['longitud'] !== '' ? (float)$input['longitud'] : null;
 
-    if ($idSupervisor <= 0 || $idAsignacion <= 0) {
+    if ($idSupervisor <= 0 || $idCuentaCampo <= 0 || $idTable <= 0 || $idCartera <= 0) {
         responder_json(['ok' => false, 'message' => 'Datos inválidos para registrar dirección.'], 400);
     }
 
@@ -1205,56 +1429,119 @@ function guardar_direccion_supervisor(mysqli $mysqli): void
     }
 
     try {
-        validar_asignacion_supervisor($mysqli, $idAsignacion, $ctx);
-        $idFuente = obtener_id_catalogo($mysqli, 'geocampo_fuente_correccion_direccion', 'id_fuente_correccion', 'SUPERVISOR');
-        $validado = ($latitud !== null && $longitud !== null) ? 1 : 0;
-
-        $stmt = $mysqli->prepare("        
-            INSERT INTO geocampo_direccion_corregida (
-                id_asignacion,
-                direccion_original,
-                direccion_search,
-                direccion_corregida,
-                distrito_original,
-                distrito_corregido,
-                ubigeo_original,
-                ubigeo_corregido,
-                latitud,
-                longitud,
-                id_fuente_correccion,
-                validado,
-                id_usuario_registro,
-                fecha_registro,
-                fecha_validacion
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), CASE WHEN ? = 1 THEN NOW() ELSE NULL END)
-        ");
-        if (!$stmt) {
-            throw new Exception('Error preparando dirección: ' . $mysqli->error);
+        if ($idAsignacion > 0) {
+            $asignacion = validar_asignacion_supervisor($mysqli, $idAsignacion, $ctx);
+            $idCuentaCampo = (int)($asignacion['id_cuenta_campo'] ?? $idCuentaCampo);
         }
 
-        $stmt->bind_param(
-            'isssssssddiiii',
-            $idAsignacion,
-            $direccionOriginal,
-            $direccionSearch,
-            $direccionCorregida,
-            $distritoOriginal,
-            $distritoCorregido,
-            $ubigeoOriginal,
-            $ubigeoCorregido,
-            $latitud,
-            $longitud,
-            $idFuente,
-            $validado,
-            $idSupervisor,
-            $validado
-        );
+        validar_cuenta_supervisor($mysqli, $idCuentaCampo, $ctx);
+
+        $idFuente = obtener_id_catalogo($mysqli, 'geocampo_fuente_correccion_direccion', 'id_fuente_correccion', 'SUPERVISOR');
+        $validado = ($latitud !== null && $longitud !== null) ? 1 : 0;
+        $soportaCuenta = direccion_corregida_soporta_cuenta($mysqli);
+
+        if (!$soportaCuenta && $idAsignacion <= 0) {
+            throw new Exception('La tabla geocampo_direccion_corregida aún no permite registrar direcciones por cuenta sin asignación. Ejecuta el SQL incluido en el ZIP para habilitar id_cuenta_campo, id_table e id_cartera.');
+        }
+
+        if ($soportaCuenta) {
+            $idAsignacionInsert = $idAsignacion > 0 ? $idAsignacion : null;
+            $stmt = $mysqli->prepare("        
+                INSERT INTO geocampo_direccion_corregida (
+                    id_asignacion,
+                    id_cuenta_campo,
+                    id_table,
+                    id_cartera,
+                    direccion_original,
+                    direccion_search,
+                    direccion_corregida,
+                    distrito_original,
+                    distrito_corregido,
+                    ubigeo_original,
+                    ubigeo_corregido,
+                    latitud,
+                    longitud,
+                    id_fuente_correccion,
+                    validado,
+                    id_usuario_registro,
+                    fecha_registro,
+                    fecha_validacion
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), CASE WHEN ? = 1 THEN NOW() ELSE NULL END)
+            ");
+            if (!$stmt) {
+                throw new Exception('Error preparando dirección: ' . $mysqli->error);
+            }
+
+            $stmt->bind_param(
+                'iiiisssssssddiiii',
+                $idAsignacionInsert,
+                $idCuentaCampo,
+                $idTable,
+                $idCartera,
+                $direccionOriginal,
+                $direccionSearch,
+                $direccionCorregida,
+                $distritoOriginal,
+                $distritoCorregido,
+                $ubigeoOriginal,
+                $ubigeoCorregido,
+                $latitud,
+                $longitud,
+                $idFuente,
+                $validado,
+                $idSupervisor,
+                $validado
+            );
+        } else {
+            $stmt = $mysqli->prepare("        
+                INSERT INTO geocampo_direccion_corregida (
+                    id_asignacion,
+                    direccion_original,
+                    direccion_search,
+                    direccion_corregida,
+                    distrito_original,
+                    distrito_corregido,
+                    ubigeo_original,
+                    ubigeo_corregido,
+                    latitud,
+                    longitud,
+                    id_fuente_correccion,
+                    validado,
+                    id_usuario_registro,
+                    fecha_registro,
+                    fecha_validacion
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), CASE WHEN ? = 1 THEN NOW() ELSE NULL END)
+            ");
+            if (!$stmt) {
+                throw new Exception('Error preparando dirección: ' . $mysqli->error);
+            }
+
+            $stmt->bind_param(
+                'isssssssddiiii',
+                $idAsignacion,
+                $direccionOriginal,
+                $direccionSearch,
+                $direccionCorregida,
+                $distritoOriginal,
+                $distritoCorregido,
+                $ubigeoOriginal,
+                $ubigeoCorregido,
+                $latitud,
+                $longitud,
+                $idFuente,
+                $validado,
+                $idSupervisor,
+                $validado
+            );
+        }
+
         $stmt->execute();
         $idDireccionCorregida = (int)$mysqli->insert_id;
         $stmt->close();
 
+        $selectExtra = $soportaCuenta ? ', id_cuenta_campo, id_table, id_cartera' : '';
         $rowsVerificacion = query_all($mysqli, "
-            SELECT id_direccion_corregida, id_asignacion, direccion_original, direccion_search, direccion_corregida,
+            SELECT id_direccion_corregida, id_asignacion{$selectExtra}, direccion_original, direccion_search, direccion_corregida,
                    distrito_original, distrito_corregido, ubigeo_original, ubigeo_corregido,
                    latitud, longitud, id_fuente_correccion, validado, fecha_registro, fecha_validacion
             FROM geocampo_direccion_corregida
@@ -1332,6 +1619,7 @@ function obtener_ruta_asesor_supervisor(mysqli $mysqli): void
 
     $ruta = $rutas[0];
     $idHojaRuta = (int)$ruta['id_hoja_ruta'];
+    $joinDireccionCorregida = construir_join_direccion_corregida($mysqli, $idTable, $idCarteraCtx);
 
     $rows = query_all($mysqli, "
         SELECT
@@ -1373,14 +1661,7 @@ function obtener_ruta_asesor_supervisor(mysqli $mysqli): void
             {$direccionesSql}
         ) d
             ON d.DOC = c.documento
-        LEFT JOIN geocampo_direccion_corregida dc
-            ON dc.id_direccion_corregida = (
-                SELECT dc2.id_direccion_corregida
-                FROM geocampo_direccion_corregida dc2
-                WHERE dc2.id_asignacion = ga.id_asignacion
-                ORDER BY dc2.id_direccion_corregida DESC
-                LIMIT 1
-            )
+        {$joinDireccionCorregida}
         WHERE hrd.id_hoja_ruta = ?
         ORDER BY COALESCE(hrd.orden_visita, 999999), hrd.id_detalle
     ", 'ii', [$idAsesor, $idHojaRuta]);

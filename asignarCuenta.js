@@ -52,19 +52,54 @@ function escaparHTML(valor) {
 
 function claseEstadoAsignacion(codigo) {
   const estado = String(codigo || "").toUpperCase();
-  if (["VISITADO", "CERRADO"].includes(estado)) {
+  if (["VISITADO", "VI", "CERRADO", "CE"].includes(estado)) {
     return "bg-emerald-50 border-emerald-100 text-emerald-700";
   }
-  if (["PENDIENTE", "SIN_ASIGNAR"].includes(estado)) {
+  if (
+    ["PENDIENTE", "PE", "SIN_ASIGNAR", "SA", "SIN ASIGNAR"].includes(estado)
+  ) {
     return "bg-amber-50 border-amber-100 text-amber-700";
   }
-  if (["AGENDADO", "REPROGRAMADO"].includes(estado)) {
+  if (["AGENDADO", "AG", "REPROGRAMADO", "RP"].includes(estado)) {
     return "bg-blue-50 border-blue-100 text-blue-700";
   }
-  if (["NO_ENCONTRADO", "ANULADO"].includes(estado)) {
+  if (
+    ["NO_ENCONTRADO", "NE", "NO ENCONTRADO", "ANULADO", "AN"].includes(estado)
+  ) {
     return "bg-red-50 border-red-100 text-red-700";
   }
   return "bg-gray-100 border-gray-200 text-gray-600";
+}
+
+function codigoEstadoCompleto(codigo) {
+  return String(codigo || "")
+    .trim()
+    .toUpperCase()
+    .replaceAll(" ", "_");
+}
+
+function abreviarEstadoAsignacion(codigo) {
+  const estado = codigoEstadoCompleto(codigo);
+  const mapa = {
+    SIN_ASIGNAR: "SA",
+    PENDIENTE: "PE",
+    AGENDADO: "AG",
+    VISITADO: "VI",
+    NO_ENCONTRADO: "NE",
+    REPROGRAMADO: "RP",
+    CERRADO: "CE",
+    ANULADO: "AN",
+  };
+  return mapa[estado] || estado.substring(0, 2) || "--";
+}
+
+function tooltipEstadoAsignacion(codigo, descripcion = "") {
+  const estado = codigoEstadoCompleto(codigo);
+  const estadoLegible = estado ? estado.replaceAll("_", " ") : "SIN ESTADO";
+  const detalle = String(descripcion || "").trim();
+  return detalle && detalle.toUpperCase() !== estadoLegible
+    ? `(${estadoLegible}) ${detalle}`
+    : `(${estadoLegible})`;
 }
 
 function valorVisibleInfoCliente(valor) {
@@ -251,7 +286,11 @@ async function abrirInfoClienteAsignar(idCuenta) {
   if (!cuenta) return;
 
   const subtitulo = `${cuenta.cliente || "Cliente"}${cuenta.documento ? ` · ${cuenta.documento}` : ""}`;
-  pintarInfoCliente("Información del cliente", subtitulo, `<div class="text-sm text-gray-500">Cargando información...</div>`);
+  pintarInfoCliente(
+    "Información del cliente",
+    subtitulo,
+    `<div class="text-sm text-gray-500">Cargando información...</div>`,
+  );
 
   try {
     const data = await apiGet("info_cliente", {
@@ -346,6 +385,10 @@ function cuentaPorAsignacion(idAsignacion) {
   );
 }
 
+function cuentaPorId(idCuenta) {
+  return cuentas.find((cuenta) => Number(cuenta.id) === Number(idCuenta));
+}
+
 function construirQueryParams(params) {
   const query = new URLSearchParams();
 
@@ -433,6 +476,7 @@ function asegurarModalDireccionSupervisor() {
       </div>
       <div class="p-5 space-y-3 text-xs max-h-[72vh] overflow-y-auto">
         <input type="hidden" id="direccionSupervisorAsignacionId">
+        <input type="hidden" id="direccionSupervisorCuentaId">
         <input type="hidden" id="latitudDireccionSupervisor">
         <input type="hidden" id="longitudDireccionSupervisor">
         <input type="hidden" id="distritoOriginalSupervisor">
@@ -498,9 +542,10 @@ function asegurarModalDireccionSupervisor() {
   return modal;
 }
 
-function abrirModalDireccionSupervisor(idAsignacion) {
-  const cuenta = cuentaPorAsignacion(idAsignacion);
+function abrirModalDireccionSupervisor(idCuenta) {
+  const cuenta = cuentaPorId(idCuenta) || cuentaPorAsignacion(idCuenta);
   if (!cuenta) return;
+  const idAsignacion = Number(cuenta.id_asignacion || 0);
   const modal = asegurarModalDireccionSupervisor();
   const direccionOriginal =
     cuenta.direccion ||
@@ -510,7 +555,8 @@ function abrirModalDireccionSupervisor(idAsignacion) {
   const distritoOriginal = cuenta.distrito_original || cuenta.distrito || "";
   const ubigeoOriginal = cuenta.ubigeo_original || cuenta.ubigeo || "";
 
-  $("#direccionSupervisorAsignacionId").value = idAsignacion;
+  $("#direccionSupervisorAsignacionId").value = idAsignacion || "";
+  $("#direccionSupervisorCuentaId").value = cuenta.id || "";
   $("#direccionSupervisorCuenta").textContent =
     `${cuenta.cuenta || cuenta.id} - ${cuenta.cliente || "Cliente"}`;
   $("#direccionOriginalSupervisor").value = direccionOriginal;
@@ -691,9 +737,11 @@ async function guardarDireccionSupervisor() {
     const idAsignacion = Number(
       $("#direccionSupervisorAsignacionId").value || 0,
     );
+    const idCuentaCampo = Number($("#direccionSupervisorCuentaId").value || 0);
     const data = await apiPost("guardar_direccion_supervisor", {
       cartera: $("#filtroCartera").value,
       id_asignacion: idAsignacion,
+      id_cuenta_campo: idCuentaCampo,
       direccion_original: valorInput("#direccionOriginalSupervisor"),
       direccion_search: valorInput("#direccionSearchSupervisor"),
       direccion_corregida: valorInput("#direccionCorregidaSupervisor"),
@@ -978,10 +1026,14 @@ function actualizarFiltrosDependientes(filtros, mantenerValores = true) {
   setSelectOptions($("#filtroPago"), filtros.pagos || [], "Todos");
 
   if (mantenerValores) {
-    if (valorExisteEnOpciones($("#filtroDistrito"), distritoActual)) $("#filtroDistrito").value = distritoActual;
-    if (valorExisteEnOpciones($("#filtroSegmento"), segmentoActual)) $("#filtroSegmento").value = segmentoActual;
-    if (valorExisteEnOpciones($("#filtroEstado"), estadoActual)) $("#filtroEstado").value = estadoActual;
-    if (valorExisteEnOpciones($("#filtroPago"), pagoActual)) $("#filtroPago").value = pagoActual;
+    if (valorExisteEnOpciones($("#filtroDistrito"), distritoActual))
+      $("#filtroDistrito").value = distritoActual;
+    if (valorExisteEnOpciones($("#filtroSegmento"), segmentoActual))
+      $("#filtroSegmento").value = segmentoActual;
+    if (valorExisteEnOpciones($("#filtroEstado"), estadoActual))
+      $("#filtroEstado").value = estadoActual;
+    if (valorExisteEnOpciones($("#filtroPago"), pagoActual))
+      $("#filtroPago").value = pagoActual;
   }
 }
 
@@ -1115,10 +1167,23 @@ function renderCuentas() {
         cuenta.direccion_depurada ||
         cuenta.direccion ||
         "";
-      const puedeEditarDireccion = Number(cuenta.id_asignacion || 0) > 0;
-      const estadoCodigo = cuenta.estado_general || cuenta.estado_codigo || (cuenta.asesorId ? "PENDIENTE" : "SIN_ASIGNAR");
-      const estadoDescripcion = cuenta.estado_tooltip || cuenta.estado_descripcion || cuenta.estado || estadoCodigo;
-      const estadoClase = claseEstadoAsignacion(estadoCodigo);
+      const puedeEditarDireccion = Number(cuenta.id || 0) > 0;
+      const estadoCodigoCompleto =
+        cuenta.estado_codigo_completo ||
+        cuenta.estado_codigo ||
+        cuenta.estado_general ||
+        (cuenta.asesorId ? "PENDIENTE" : "SIN_ASIGNAR");
+      const estadoVisible =
+        cuenta.estado_abreviado ||
+        abreviarEstadoAsignacion(estadoCodigoCompleto);
+      const estadoDescripcion = tooltipEstadoAsignacion(
+        estadoCodigoCompleto,
+        cuenta.estado_descripcion ||
+          cuenta.estado_tooltip ||
+          cuenta.estado ||
+          "",
+      );
+      const estadoClase = claseEstadoAsignacion(estadoCodigoCompleto);
       const puedeVerInfo = String(cuenta.identificador || "").trim() !== "";
 
       return `
@@ -1157,14 +1222,14 @@ function renderCuentas() {
           <td class="px-3 py-3">
             <span title="${escaparHTML(estadoDescripcion)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${estadoClase}">
               <i data-lucide="clock-3" class="w-3 h-3"></i>
-              ${escaparHTML(estadoCodigo)}
+              ${escaparHTML(estadoVisible)}
             </span>
           </td>
 
           <td class="px-3 py-3">
             <span title="${escaparHTML(pagoTitulo)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${tienePago ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-red-50 border-red-100 text-red-700"}">
               <i data-lucide="${tienePago ? "badge-check" : "circle-x"}" class="w-3 h-3"></i>
-              ${tienePago ? "Pago" : "No pago"}
+              ${tienePago ? "Pago" : "NP"}
             </span>
           </td>
 
@@ -1181,7 +1246,7 @@ function renderCuentas() {
                 <i data-lucide="id-card" class="w-3 h-3"></i>
                 Info
               </button>
-              <button type="button" class="btnDireccionSupervisor inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-[11px] disabled:opacity-40 disabled:cursor-not-allowed" data-id-asignacion="${cuenta.id_asignacion || ""}" ${puedeEditarDireccion ? "" : "disabled"} title="${puedeEditarDireccion ? "Actualizar dirección" : "Primero debe existir una asignación activa"}">
+              <button type="button" class="btnDireccionSupervisor inline-flex items-center justify-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 hover:bg-gray-50 text-[11px] disabled:opacity-40 disabled:cursor-not-allowed" data-id-cuenta="${cuenta.id || ""}" ${puedeEditarDireccion ? "" : "disabled"} title="${puedeEditarDireccion ? "Actualizar dirección" : "Cuenta inválida"}">
                 <i data-lucide="map-pin" class="w-3 h-3"></i>
                 Dirección
               </button>
@@ -1201,8 +1266,8 @@ function renderCuentas() {
 
   document.querySelectorAll(".btnDireccionSupervisor").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const idAsignacion = Number(btn.dataset.idAsignacion || 0);
-      if (idAsignacion > 0) abrirModalDireccionSupervisor(idAsignacion);
+      const idCuenta = Number(btn.dataset.idCuenta || 0);
+      if (idCuenta > 0) abrirModalDireccionSupervisor(idCuenta);
     });
   });
 

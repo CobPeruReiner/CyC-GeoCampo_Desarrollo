@@ -632,7 +632,6 @@ function badgeEstado(codigo, descripcion) {
   return `<span title="${escaparHTML(descripcionEstado)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${clases[codigoEstado] || clases.PENDIENTE}"><i data-lucide="${iconos[codigoEstado] || "clock-3"}" class="w-3 h-3"></i>${escaparHTML(codigoEstado)}</span>`;
 }
 
-
 function estadoGeneralCuenta(cuenta) {
   const codigo =
     cuenta.estado_general ||
@@ -647,7 +646,6 @@ function estadoGeneralCuenta(cuenta) {
     codigo;
   return { codigo, descripcion };
 }
-
 
 function renderTabla() {
   if (estado.cargando) {
@@ -706,7 +704,7 @@ function renderTabla() {
         <td class="px-3 py-3 align-middle">
           <span title="${escaparHTML(pagoTitulo)}" class="inline-flex items-center gap-1 px-2 py-1 rounded-full border ${tienePago ? "bg-emerald-50 border-emerald-100 text-emerald-700" : "bg-red-50 border-red-100 text-red-700"}">
             <i data-lucide="${tienePago ? "badge-check" : "circle-x"}" class="w-3 h-3"></i>
-            ${tienePago ? "Pago" : "No pago"}
+            ${tienePago ? "Pago" : "NP"}
           </span>
         </td>
         <td class="px-3 py-3 align-middle">
@@ -1145,7 +1143,9 @@ function fuenteCorreccionParaGuardar() {
   const fuenteActual = String(estado.direccionFuenteCorreccion || "")
     .trim()
     .toUpperCase();
-  if (["SISTEMA", "ASESOR", "SEARCH", "SUPERVISOR", "OTRO"].includes(fuenteActual)) {
+  if (
+    ["SISTEMA", "ASESOR", "SEARCH", "SUPERVISOR", "OTRO"].includes(fuenteActual)
+  ) {
     return fuenteActual;
   }
   return determinarFuenteCorreccionDireccion();
@@ -1885,10 +1885,14 @@ function configurarEventos() {
   $("#btnGuardarMapaRuta").addEventListener("click", guardarRutaDesdeMapa);
   $("#btnAgregarPendientes")?.addEventListener("click", agregarPendientesARuta);
   $("#direccionCorregidaModal").addEventListener("input", () => {
-    if (valorInput("#direccionCorregidaModal")) estado.direccionFuenteCorreccion = "ASESOR";
+    if (valorInput("#direccionCorregidaModal"))
+      estado.direccionFuenteCorreccion = "ASESOR";
   });
   $("#direccionSearchModal").addEventListener("input", () => {
-    if (valorInput("#direccionSearchModal") && !valorInput("#direccionCorregidaModal")) {
+    if (
+      valorInput("#direccionSearchModal") &&
+      !valorInput("#direccionCorregidaModal")
+    ) {
       estado.direccionFuenteCorreccion = "SEARCH";
     }
   });

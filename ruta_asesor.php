@@ -1,16 +1,26 @@
 <?php
 date_default_timezone_set('America/Lima');
+
 session_name('geocampo');
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
-$idUsuario = isset($_GET['id_usuario']) ? (int)$_GET['id_usuario'] : (int)($_SESSION['id'] ?? 0);
+if (empty($_SESSION['id'])) {
+    header("Location: index.php");
+    exit;
+}
+
+$idUsuario = isset($_GET['id_usuario'])
+    ? (int)$_GET['id_usuario']
+    : (int)$_SESSION['id'];
+
 if ($idUsuario <= 0) {
     http_response_code(400);
     echo 'No se recibió un asesor válido.';
     exit;
 }
+
 $_SESSION['id_ruta_asesor'] = $idUsuario;
 ?>
 <!DOCTYPE html>
@@ -84,7 +94,7 @@ $_SESSION['id_ruta_asesor'] = $idUsuario;
 </head>
 
 <body class="bg-[#F4F6F8] text-gray-900">
-    <main class="max-w-[1700px] mx-auto px-3 py-4 md:px-6 md:py-8">
+    <main class="mx-auto px-3 py-4 md:px-6 md:py-8">
         <input type="hidden" id="idUsuario" value="<?= htmlspecialchars((string)$idUsuario, ENT_QUOTES, 'UTF-8') ?>">
 
         <header class="corporate-header px-4 py-4 md:px-6 md:py-5 mb-5 md:mb-6">
