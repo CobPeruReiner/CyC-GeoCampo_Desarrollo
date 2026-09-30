@@ -533,13 +533,12 @@ function h($value): string
 
     .ubigeo-summary {
       display: none;
-      align-items: flex-start;
-      gap: 10px;
-      margin-top: 10px;
-      padding: 11px 12px;
-      border: 1px solid #d8e7f8;
-      border-radius: 14px;
-      background: #f7fbff;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+      color: #5c6c80;
+      font-size: .76rem;
+      line-height: 1.35;
     }
 
     .ubigeo-summary.show {
@@ -547,15 +546,15 @@ function h($value): string
     }
 
     .ubigeo-summary-icon {
-      width: 34px;
-      height: 34px;
+      width: 26px;
+      height: 26px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       flex: 0 0 auto;
-      border-radius: 11px;
+      border-radius: 50%;
       color: #1769aa;
-      background: #e8f3ff;
+      background: #edf7ff;
     }
 
     .ubigeo-summary-content {
@@ -564,45 +563,37 @@ function h($value): string
     }
 
     .ubigeo-summary-title {
-      margin-bottom: 7px;
-      color: #215f97;
-      font-size: .72rem;
+      margin-right: 5px;
+      color: #62758b;
+      font-size: .7rem;
       font-weight: 800;
       letter-spacing: .04em;
       text-transform: uppercase;
     }
 
     .ubigeo-summary-values {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 6px;
+      display: inline;
     }
 
     .ubigeo-summary-value {
-      min-width: 0;
-      padding: 6px 8px;
-      border-radius: 9px;
-      background: #fff;
-      border: 1px solid #e4ebf4;
+      display: inline;
     }
 
     .ubigeo-summary-value span {
-      display: block;
-      margin-bottom: 2px;
-      color: #718096;
-      font-size: .65rem;
-      font-weight: 800;
-      letter-spacing: .04em;
-      text-transform: uppercase;
+      display: none;
     }
 
     .ubigeo-summary-value strong {
-      display: block;
-      color: #253245;
+      color: #234b70;
       font-size: .8rem;
       font-weight: 800;
-      line-height: 1.25;
       overflow-wrap: anywhere;
+    }
+
+    .ubigeo-summary-value:not(:last-child)::after {
+      content: ' / ';
+      color: #9aabba;
+      font-weight: 600;
     }
 
     .gps-alert,
@@ -883,47 +874,36 @@ function h($value): string
       }
 
       .ubigeo-summary {
-        gap: 9px;
-        margin-top: 9px;
-        padding: 10px;
-        border-radius: 14px;
+        align-items: flex-start;
+        gap: 7px;
+        margin-top: 7px;
+        font-size: .74rem;
       }
 
       .ubigeo-summary-icon {
-        width: 32px;
-        height: 32px;
-        border-radius: 10px;
-        font-size: .82rem;
+        width: 24px;
+        height: 24px;
+        font-size: .72rem;
       }
 
       .ubigeo-summary-title {
-        display: block;
-        margin-bottom: 6px;
-        font-size: .68rem;
+        font-size: .65rem;
       }
 
       .ubigeo-summary-values {
-        grid-template-columns: 1fr;
-        gap: 4px;
+        display: inline;
       }
 
       .ubigeo-summary-value {
-        display: grid;
-        grid-template-columns: minmax(82px, .8fr) minmax(0, 1.2fr);
-        align-items: baseline;
-        column-gap: 8px;
-        padding: 6px 8px;
-        border-radius: 8px;
+        display: inline;
       }
 
       .ubigeo-summary-value span {
-        margin: 0;
-        font-size: .6rem;
+        display: none;
       }
 
       .ubigeo-summary-value strong {
-        font-size: .76rem;
-        text-align: right;
+        font-size: .78rem;
       }
 
       .actions-bar {
@@ -1045,11 +1025,11 @@ function h($value): string
               <aside id="ubigeo-summary" class="ubigeo-summary" aria-live="polite" aria-label="Ubigeo de la cuenta">
                 <span class="ubigeo-summary-icon"><i class="fas fa-map-marker-alt"></i></span>
                 <div class="ubigeo-summary-content">
-                  <div class="ubigeo-summary-title">Ubigeo de la cuenta</div>
+                  <span class="ubigeo-summary-title">Ubigeo</span>
                   <div class="ubigeo-summary-values">
-                    <div class="ubigeo-summary-value"><span>Departamento</span><strong id="ubigeo-departamento">No registrado</strong></div>
-                    <div class="ubigeo-summary-value"><span>Provincia</span><strong id="ubigeo-provincia">No registrado</strong></div>
-                    <div class="ubigeo-summary-value"><span>Distrito</span><strong id="ubigeo-distrito">No registrado</strong></div>
+                    <span class="ubigeo-summary-value"><span>Departamento: </span><strong id="ubigeo-departamento">No registrado</strong></span>
+                    <span class="ubigeo-summary-value"><span>Provincia: </span><strong id="ubigeo-provincia">No registrado</strong></span>
+                    <span class="ubigeo-summary-value"><span>Distrito: </span><strong id="ubigeo-distrito">No registrado</strong></span>
                   </div>
                 </div>
               </aside>
