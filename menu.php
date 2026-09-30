@@ -694,7 +694,7 @@ $primerNombre = htmlspecialchars($primerNombre !== '' ? $primerNombre : 'Usuario
             const carteraSesion = <?php echo (int)($_SESSION['cartera'] ?? 0); ?>;
             const cargoUsuario = <?php echo (int)$cargoPersonal; ?>;
             const idPersonal = <?php echo (int)$_SESSION['id']; ?>;
-            const adminIds = [14, 17, 21, 22, 25, 27, 38, 44, 49, 71, 78, 173, 185, 186, 202, 203, 207, 240, 297, 348, 352, 410, 411, 413, 470, 478, 480, 482, 515, 647, 655, 668, 735, 765, 769, 788, 793, 802, 813, 820, 861, 1275, 1316, 1391, 1449, 259];
+            const adminIds = [14, 17, 21, 22, 25, 38, 73, 78, 173, 186, 203, 207, 297, 352, 413, 647, 788, 793, 1391, 1449, 259, 1798];
 
             const carteraSelect = document.getElementById('id_tabla');
             const menuSkeleton = document.getElementById('menuSkeleton');
@@ -729,7 +729,7 @@ $primerNombre = htmlspecialchars($primerNombre !== '' ? $primerNombre : 'Usuario
 
             function cargarOpciones() {
                 let tieneCartera59 = carteraSesion === 59;
-                let tieneCartera63 = carteraSesion === 63;
+                let tieneCartera63 = carteraSesion === 59;
 
                 carteraSelect.disabled = true;
                 carteraSelect.innerHTML = '<option value="">Cargando carteras...</option>';
@@ -762,7 +762,7 @@ $primerNombre = htmlspecialchars($primerNombre !== '' ? $primerNombre : 'Usuario
 
                             const idCartera = parseInt(item.id_cartera, 10);
                             if (idCartera === 59) tieneCartera59 = true;
-                            if (idCartera === 63) tieneCartera63 = true;
+                            if (idCartera === 59) tieneCartera63 = true;
                         });
 
                         carteraSelect.disabled = false;
@@ -839,8 +839,13 @@ $primerNombre = htmlspecialchars($primerNombre !== '' ? $primerNombre : 'Usuario
 
             const rutaAsesorLink = document.querySelector('.ruta-asesor');
             rutaAsesorLink.addEventListener('click', function(e) {
+
                 e.preventDefault();
-                goTo(`ruta_asesor.php?id_usuario=${idPersonal}`);
+                if (carteraSesion === 59 && [11, 12, 14, 23].includes(cargoUsuario)) {
+                    goTo(`ruta_asesor2.php?id_usuario=${idPersonal}`);
+                } else {
+                    goTo(`ruta_asesor.php?id_usuario=${idPersonal}`);
+                }
             });
 
             const rutaSupervisorLink = document.querySelector('.ruta-supervisor');

@@ -76,11 +76,12 @@ $pisos       = $_POST['pisos'];
 $puerta      = $_POST['puerta'];
 $fachada     = $_POST['fachada'];
 
-$fecha_promesa = !empty($_POST['fecha_promesa']) ? "'{$_POST['fecha_promesa']}'" : "NULL";
+$fechaPromesaRaw = isset($_POST['fecha_promesa']) ? trim((string)$_POST['fecha_promesa']) : '';
+$montoPromesaRaw = isset($_POST['monto_promesa']) ? trim((string)$_POST['monto_promesa']) : '';
 
-$monto_promesa = !empty($_POST['monto_promesa']) && floatval($_POST['monto_promesa']) > 0
-  ? "'" . floatval($_POST['monto_promesa']) . "'"
-  : "NULL";
+// Por defecto, los efectos que no son promesa guardan ambos valores como NULL.
+$fecha_promesa = "NULL";
+$monto_promesa = "NULL";
 
 $latitud  = isset($_POST['latitud']) ? floatval($_POST['latitud']) : 0;
 $longitud = isset($_POST['longitud']) ? floatval($_POST['longitud']) : 0;
@@ -109,39 +110,78 @@ $row = $result->fetch_assoc();
 $esPromesa = isset($row['promesa']) && intval($row['promesa']) === 1;
 
 if ($esPromesa) {
-
-  if (empty($_POST['fecha_promesa'])) {
-
+  if ($fechaPromesaRaw === '') {
     echo json_encode([
       "success" => false,
-      "message" => "Debe registrar la fecha de promesa."
+      "message" => "Selecciona la fecha de promesa."
     ]);
     exit;
   }
 
-  if (empty($_POST['monto_promesa']) || floatval($_POST['monto_promesa']) <= 0) {
+  $zonaHoraria = new DateTimeZone('America/Lima');
+  $fechaPromesaObj = DateTimeImmutable::createFromFormat('!Y-m-d', $fechaPromesaRaw, $zonaHoraria);
+  $erroresFecha = DateTimeImmutable::getLastErrors();
+  $fechaInvalida = $fechaPromesaObj === false
+    || ($erroresFecha !== false && ($erroresFecha['warning_count'] > 0 || $erroresFecha['error_count'] > 0))
+    || ($fechaPromesaObj !== false && $fechaPromesaObj->format('Y-m-d') !== $fechaPromesaRaw);
 
+  if ($fechaInvalida) {
     echo json_encode([
       "success" => false,
-      "message" => "Debe registrar un monto de promesa válido."
+      "message" => "Revisa la fecha de promesa seleccionada."
     ]);
     exit;
   }
 
-  $fechaPromesa = $_POST['fecha_promesa'];
+  $hoy = new DateTimeImmutable('today', $zonaHoraria);
+  $ultimoDiaMes = $hoy->modify('last day of this month');
 
-  $mesActual = date('Y-m');
-  $mesPromesa = date('Y-m', strtotime($fechaPromesa));
-
-  if ($mesPromesa !== $mesActual) {
-
+  if ($fechaPromesaObj < $hoy) {
     echo json_encode([
       "success" => false,
-      "message" => "La fecha de promesa debe estar dentro del mes actual."
+      "message" => "Selecciona una fecha desde hoy."
     ]);
     exit;
   }
+
+  if ($fechaPromesaObj > $ultimoDiaMes) {
+    echo json_encode([
+      "success" => false,
+      "message" => "Selecciona una fecha dentro de este mes."
+    ]);
+    exit;
+  }
+
+  if ($montoPromesaRaw === '') {
+    echo json_encode([
+      "success" => false,
+      "message" => "Ingresa el monto de la promesa."
+    ]);
+    exit;
+  }
+
+  if (!is_numeric($montoPromesaRaw)) {
+    echo json_encode([
+      "success" => false,
+      "message" => "Revisa el monto de la promesa."
+    ]);
+    exit;
+  }
+
+  $montoPromesaValor = (float)$montoPromesaRaw;
+
+  if (!is_finite($montoPromesaValor) || $montoPromesaValor < 0) {
+    echo json_encode([
+      "success" => false,
+      "message" => "Ingresa un monto igual o mayor a 0."
+    ]);
+    exit;
+  }
+
+  $fecha_promesa = "'" . $mysqli->real_escape_string($fechaPromesaRaw) . "'";
+  $monto_promesa = number_format($montoPromesaValor, 2, '.', '');
 }
+
 
 
 if ($horaVisita < "07:00:00" || $horaVisita > "20:00:00") {
@@ -249,7 +289,8 @@ function subirImagen(
   $MAX_BYTES,
   $finfo,
   $lat,
-  $lon
+  $lon,
+  $procesarImagen = true
 ) {
 
   // DEBUG UPLOAD
@@ -278,6 +319,12 @@ function subirImagen(
 
   if (!move_uploaded_file($_FILES[$campo]['tmp_name'], $destPath)) {
     return null;
+  }
+
+  // KIWIPAY (cartera 91) requiere conservar el archivo original, sin
+  // reducción, consulta de ubicación ni texto incrustado en la imagen.
+  if (!$procesarImagen) {
+    return $finalName;
   }
 
   reducirImagen($destPath, 1600);
@@ -364,6 +411,9 @@ $estadoGPS = obtenerEstadoUbicacion(
 
 // ==================== REQUERIMIENTO INCRUSTAR DATOS EN IMAGEN ====================
 
+$idcartera = isset($_POST['id_cartera']) ? (int)$_POST['id_cartera'] : 0;
+$procesarImagen = $idcartera !== 91;
+
 $imagen1 = subirImagen(
   'imagen1',
   'Imagen1',
@@ -373,7 +423,8 @@ $imagen1 = subirImagen(
   $MAX_BYTES,
   $finfo,
   $latitud,
-  $longitud
+  $longitud,
+  $procesarImagen
 );
 
 $imagen2 = subirImagen(
@@ -385,7 +436,8 @@ $imagen2 = subirImagen(
   $MAX_BYTES,
   $finfo,
   $latitud,
-  $longitud
+  $longitud,
+  $procesarImagen
 );
 
 $imagen3 = subirImagen(
@@ -397,7 +449,8 @@ $imagen3 = subirImagen(
   $MAX_BYTES,
   $finfo,
   $latitud,
-  $longitud
+  $longitud,
+  $procesarImagen
 );
 
 // ==================== FIN REQUERIMIENTO INCRUSTAR DATOS EN IMAGEN ====================
@@ -407,8 +460,6 @@ $img2Sql = is_null($imagen2) ? "NULL" : "'" . $mysqli->real_escape_string($image
 $img3Sql = is_null($imagen3) ? "NULL" : "'" . $mysqli->real_escape_string($imagen3) . "'";
 
 $identificador_sql = $mysqli->real_escape_string($identificador);
-
-$idcartera = $_POST['id_cartera'];
 
 $sql = "CALL SP_InsertarGEOCAMPO_PRUEBA(
     '$identificador_sql',
@@ -439,7 +490,124 @@ $sql = "CALL SP_InsertarGEOCAMPO_PRUEBA(
 )";
 
 
-function marcarRutaComoVisitada(mysqli $mysqli, string $identificador, int $idPersonal, float $latitud, float $longitud, string $observacion, string $fechaGestion): array
+function tablaFisicaExisteGestion(mysqli $mysqli, string $tabla): bool
+{
+  if (!preg_match('/^[A-Za-z0-9_]+$/', $tabla)) return false;
+
+  $stmt = $mysqli->prepare("
+    SELECT COUNT(*) AS total
+    FROM information_schema.TABLES
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = ?
+  ");
+  if (!$stmt) return false;
+
+  $stmt->bind_param('s', $tabla);
+  $stmt->execute();
+  $row = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+
+  return (int)($row['total'] ?? 0) > 0;
+}
+
+function resolverNombreTablaGestion(mysqli $mysqli, array $row): string
+{
+  $candidatos = [
+    'tabla', 'TABLA', 'nomtable', 'NOMTABLE', 'nombre_tabla', 'NOMBRE_TABLA',
+    'tabla_fisica', 'TABLA_FISICA', 'table_name', 'TABLE_NAME', 'nom_tabla', 'NOM_TABLA'
+  ];
+
+  foreach ($candidatos as $campo) {
+    $valor = trim((string)($row[$campo] ?? ''));
+    if ($valor !== '' && preg_match('/^[A-Za-z0-9_]+$/', $valor) && tablaFisicaExisteGestion($mysqli, $valor)) {
+      return $valor;
+    }
+  }
+
+  foreach ($row as $valor) {
+    $valor = trim((string)$valor);
+    if ($valor !== '' && preg_match('/^C_[A-Za-z0-9_]+$/', $valor) && tablaFisicaExisteGestion($mysqli, $valor)) {
+      return $valor;
+    }
+  }
+
+  return '';
+}
+
+function resolverContextoGeocampoGestion(mysqli $mysqli, $idTablaParam, int $idCarteraPost): array
+{
+  $valor = trim((string)$idTablaParam);
+  $ctx = [
+    'id_table' => 0,
+    'id_cartera' => $idCarteraPost,
+    'tabla' => ''
+  ];
+
+  if ($valor !== '' && preg_match('/^[A-Za-z0-9_]+$/', $valor) && !ctype_digit($valor) && tablaFisicaExisteGestion($mysqli, $valor)) {
+    $ctx['tabla'] = $valor;
+  }
+
+  if ($valor !== '' && ctype_digit($valor)) {
+    $idTabla = (int)$valor;
+    $stmt = $mysqli->prepare("SELECT * FROM tabla_log WHERE id = ? LIMIT 1");
+    if ($stmt) {
+      $stmt->bind_param('i', $idTabla);
+      $stmt->execute();
+      $row = $stmt->get_result()->fetch_assoc();
+      $stmt->close();
+      if ($row) {
+        $ctx['id_table'] = (int)($row['id'] ?? $idTabla);
+        $ctx['id_cartera'] = (int)($row['id_cartera'] ?? $row['IDCARTERA'] ?? $idCarteraPost);
+        $ctx['tabla'] = resolverNombreTablaGestion($mysqli, $row);
+      }
+    }
+  }
+
+  if ($ctx['tabla'] === '') {
+    $stmt = $mysqli->prepare("SELECT * FROM tabla_log WHERE id_cartera = ? AND estado = 0 ORDER BY id DESC LIMIT 1");
+    if ($stmt) {
+      $stmt->bind_param('i', $idCarteraPost);
+      $stmt->execute();
+      $row = $stmt->get_result()->fetch_assoc();
+      $stmt->close();
+      if ($row) {
+        $ctx['id_table'] = (int)($row['id'] ?? 0);
+        $ctx['id_cartera'] = (int)($row['id_cartera'] ?? $idCarteraPost);
+        $ctx['tabla'] = resolverNombreTablaGestion($mysqli, $row);
+      }
+    }
+  }
+
+  if ($ctx['tabla'] === '' && tablaFisicaExisteGestion($mysqli, 'C_FINANCIERA_EFECTIVA_CAMPO')) {
+    $ctx['tabla'] = 'C_FINANCIERA_EFECTIVA_CAMPO';
+  }
+
+  return $ctx;
+}
+
+function obtenerIdEstadoVisitaGestion(mysqli $mysqli, string $codigo): int
+{
+  $stmt = $mysqli->prepare("SELECT id_estado_visita FROM geocampo_estado_visita WHERE codigo = ? AND activo = 1 LIMIT 1");
+  if (!$stmt) return 0;
+  $stmt->bind_param('s', $codigo);
+  $stmt->execute();
+  $row = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  return $row ? (int)$row['id_estado_visita'] : 0;
+}
+
+function obtenerIdEstadoAsignacionGestion(mysqli $mysqli, string $codigo): int
+{
+  $stmt = $mysqli->prepare("SELECT id_estado_asignacion FROM geocampo_estado_asignacion WHERE codigo = ? AND activo = 1 LIMIT 1");
+  if (!$stmt) return 0;
+  $stmt->bind_param('s', $codigo);
+  $stmt->execute();
+  $row = $stmt->get_result()->fetch_assoc();
+  $stmt->close();
+  return $row ? (int)$row['id_estado_asignacion'] : 0;
+}
+
+function marcarRutaComoVisitada(mysqli $mysqli, string $identificador, int $idPersonal, float $latitud, float $longitud, string $observacion, string $fechaGestion, $idTablaParam = '', int $idCarteraPost = 0): array
 {
   $resultado = [
     'detalle_actualizado' => 0,
@@ -458,47 +626,30 @@ function marcarRutaComoVisitada(mysqli $mysqli, string $identificador, int $idPe
     return $resultado;
   }
 
-  $stmt = $mysqli->prepare("
-    SELECT id_estado_visita
-    FROM geocampo_estado_visita
-    WHERE codigo = 'VISITADO'
-      AND activo = 1
-    LIMIT 1
-  ");
+  $ctx = resolverContextoGeocampoGestion($mysqli, $idTablaParam, $idCarteraPost);
+  $tablaCuentas = $ctx['tabla'];
+  $idTable = (int)$ctx['id_table'];
+  $idCarteraCtx = (int)$ctx['id_cartera'];
 
-  if (!$stmt) {
-    $resultado['motivo'] = 'No se pudo preparar consulta de estado VISITADO.';
+  if ($tablaCuentas === '') {
+    $resultado['motivo'] = 'No se pudo resolver la tabla física de la cartera para actualizar GeoCampo.';
     return $resultado;
   }
 
-  $stmt->execute();
-  $row = $stmt->get_result()->fetch_assoc();
-  $stmt->close();
-
-  if (!$row) {
+  $idEstadoVisitaVisitado = obtenerIdEstadoVisitaGestion($mysqli, 'VISITADO');
+  if ($idEstadoVisitaVisitado <= 0) {
     $resultado['motivo'] = 'No existe estado de visita VISITADO activo.';
     return $resultado;
   }
 
-  $idEstadoVisitaVisitado = (int)$row['id_estado_visita'];
+  $idEstadoAsignacionVisitado = obtenerIdEstadoAsignacionGestion($mysqli, 'VISITADO');
 
-  $idEstadoAsignacionVisitado = 0;
-  $stmt = $mysqli->prepare("
-    SELECT id_estado_asignacion
-    FROM geocampo_estado_asignacion
-    WHERE codigo = 'VISITADO'
-      AND activo = 1
-    LIMIT 1
-  ");
-
-  if ($stmt) {
-    $stmt->execute();
-    $row = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
-
-    if ($row) {
-      $idEstadoAsignacionVisitado = (int)$row['id_estado_asignacion'];
-    }
+  $filtroContextoAsignacion = '';
+  if ($idTable > 0) {
+    $filtroContextoAsignacion .= " AND ga.id_table = {$idTable} ";
+  }
+  if ($idCarteraCtx > 0) {
+    $filtroContextoAsignacion .= " AND ga.id_cartera = {$idCarteraCtx} ";
   }
 
   $stmt = $mysqli->prepare("
@@ -513,30 +664,74 @@ function marcarRutaComoVisitada(mysqli $mysqli, string $identificador, int $idPe
       ON er.id_estado_ruta = hr.id_estado_ruta
     INNER JOIN geocampo_asignacion ga
       ON ga.id_asignacion = hrd.id_asignacion
-    INNER JOIN C_FINANCIERA_EFECTIVA_CAMPO c
+    INNER JOIN {$tablaCuentas} c
       ON c.id = ga.id_cuenta_campo
+    LEFT JOIN geocampo_estado_visita ev
+      ON ev.id_estado_visita = hrd.id_estado_visita
     WHERE ga.id_asesor = ?
       AND ga.activo = 1
+      {$filtroContextoAsignacion}
       AND c.IDENTIFICADOR = ?
-      AND hr.fecha_ruta = DATE(?)
       AND er.codigo IN ('CREADA', 'EN_PROCESO')
-      AND hrd.id_estado_visita <> ?
-    ORDER BY hrd.id_detalle DESC
+      AND COALESCE(ev.codigo, '') <> 'VISITADO'
+      AND (
+            (
+              hr.fecha_inicio_semana IS NOT NULL
+              AND hr.fecha_fin_semana IS NOT NULL
+              AND DATE(?) BETWEEN hr.fecha_inicio_semana AND hr.fecha_fin_semana
+            )
+            OR (
+              hr.fecha_inicio_semana IS NULL
+              AND DATE(?) BETWEEN DATE_SUB(hr.fecha_ruta, INTERVAL WEEKDAY(hr.fecha_ruta) DAY)
+                              AND DATE_ADD(DATE_SUB(hr.fecha_ruta, INTERVAL WEEKDAY(hr.fecha_ruta) DAY), INTERVAL 6 DAY)
+            )
+          )
+    ORDER BY
+      CASE WHEN DATE(hr.fecha_ruta) = DATE(?) THEN 0 ELSE 1 END,
+      hrd.orden_visita IS NULL,
+      hrd.orden_visita,
+      hrd.id_detalle DESC
     LIMIT 1
   ");
 
   if (!$stmt) {
-    $resultado['motivo'] = 'No se pudo preparar consulta de detalle de hoja de ruta.';
+    $resultado['motivo'] = 'No se pudo preparar consulta de detalle de hoja de ruta: ' . $mysqli->error;
     return $resultado;
   }
 
-  $stmt->bind_param('issi', $idPersonal, $identificador, $fechaGestion, $idEstadoVisitaVisitado);
+  $stmt->bind_param('issss', $idPersonal, $identificador, $fechaGestion, $fechaGestion, $fechaGestion);
   $stmt->execute();
   $detalle = $stmt->get_result()->fetch_assoc();
   $stmt->close();
 
   if (!$detalle) {
-    $resultado['motivo'] = 'No se encontro detalle pendiente en hoja de ruta para la fecha de la gestion.';
+    // Fallback: si la gestión existe pero no se halló detalle de ruta, al menos sincroniza la asignación activa.
+    if ($idEstadoAsignacionVisitado > 0) {
+      $stmt = $mysqli->prepare("
+        UPDATE geocampo_asignacion ga
+        INNER JOIN {$tablaCuentas} c
+          ON c.id = ga.id_cuenta_campo
+        LEFT JOIN geocampo_estado_asignacion ea
+          ON ea.id_estado_asignacion = ga.id_estado_asignacion
+        SET ga.id_estado_asignacion = ?,
+            ga.fecha_actualizacion = NOW()
+        WHERE ga.id_asesor = ?
+          AND ga.activo = 1
+          {$filtroContextoAsignacion}
+          AND c.IDENTIFICADOR = ?
+          AND (ea.codigo IS NULL OR ea.codigo IN ('PENDIENTE', 'AGENDADO', 'REPROGRAMADO'))
+      ");
+      if ($stmt) {
+        $stmt->bind_param('iis', $idEstadoAsignacionVisitado, $idPersonal, $identificador);
+        $stmt->execute();
+        $resultado['asignacion_actualizada'] = max(0, (int)$stmt->affected_rows);
+        $stmt->close();
+      }
+    }
+
+    $resultado['motivo'] = $resultado['asignacion_actualizada'] > 0
+      ? 'Asignación actualizada como visitada; no se encontró detalle de ruta vigente.'
+      : 'No se encontro detalle pendiente en hoja de ruta para la semana de la gestion.';
     return $resultado;
   }
 
@@ -607,7 +802,9 @@ if ($mysqli->query($sql) === TRUE) {
     (float)$latitud,
     (float)$longitud,
     $observacion,
-    $fecha
+    $fecha,
+    $id_tabla,
+    (int)$idcartera
   );
 
   $response['success'] = true;

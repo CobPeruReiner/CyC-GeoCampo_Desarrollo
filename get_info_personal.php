@@ -124,6 +124,55 @@ function quote_identifier($name)
     return '`' . str_replace('`', '``', $name) . '`';
 }
 
+function is_confianza_campo_cartera($id_cartera)
+{
+    return (int)$id_cartera === 59;
+}
+
+function is_confianza_campo_table($table_name)
+{
+    return strtoupper((string)$table_name) === 'C_FINANCIERA_CONFIANZA_CAMPO';
+}
+
+function is_inteal_cycweb_table($id_table)
+{
+    return in_array((int)$id_table, [5415, 9193], true);
+}
+
+function fetch_valor_cuota_confianza_campo(mysqli $mysqli, $identificador, $id_cartera)
+{
+    if (!is_confianza_campo_cartera($id_cartera)) {
+        return null;
+    }
+
+    $identificador = trim((string)$identificador);
+    if ($identificador === '') {
+        return null;
+    }
+
+    $stmt = $mysqli->prepare(
+        'SELECT c.MONTO
+         FROM cuotas c
+         WHERE c.IDCARTERA = ?
+           AND c.IDENTIFICADOR = ?
+           AND c.IDESTADO = 1
+         LIMIT 1'
+    );
+
+    if (!$stmt) {
+        error_log('[CONSULTA_CUENTAS] Error preparando consulta de valor cuota Confianza Campo: ' . $mysqli->error);
+        return null;
+    }
+
+    $id_cartera_confianza = 59;
+    $stmt->bind_param('is', $id_cartera_confianza, $identificador);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $row = $result ? $result->fetch_assoc() : null;
+    $stmt->close();
+
+    return $row['MONTO'] ?? null;
+}
 
 function get_existing_table_columns(mysqli $mysqli, $table_name)
 {
@@ -238,13 +287,104 @@ function add_select_column_if_exists(array &$select_parts, array $existing_colum
     return true;
 }
 
-function build_store_equivalent_select_parts($table_name, array $existing_columns)
+function build_store_equivalent_select_parts($table_name, array $existing_columns, array $gui_config = [], $id_table = null)
 {
     $select_parts = [];
 
-    // No se usan alias SQL. Se traen columnas físicas y las equivalencias se resuelven en PHP.
+    /*
+     * INTEAL CASTIGO e INTEAL - COMPRA 02
+     * Los campos que se muestran se administran desde CyCWeb (gui_table).
+     * Se seleccionan todos para respetar alias, tipo y orden configurados.
+     */
+    if (is_inteal_cycweb_table($id_table)) {
+        $inteal_columns = get_configured_columns($gui_config, [
+            'identificador',
+            'documento',
+            'NOMBRE',
+            'PRODUCTO',
+            'SUBPRODUCTO'
+        ]);
+
+        foreach ($inteal_columns as $column) {
+            add_select_column_if_exists($select_parts, $existing_columns, $column);
+        }
+
+        return $select_parts;
+    }
+
+    /*
+     * FINANTY CASTIGO
+     * Campos solicitados para la ficha de consulta de esta cartera.
+     */
+    if ($table_name === 'C_FINANTY_CASTIGO') {
+        $finanty_castigo_columns = [
+            'identificador',
+            'documento',
+            'NOMBRE',
+            'DPTO',
+            'PRODUCTO',
+            'SUBPRODUCTO',
+            'SITLABORAL',
+            'CAPITAL',
+            'DEUDATOTAL',
+            'MONEDA',
+            'MONTOCAMPANA',
+            'AGENCIA',
+            'CALSBS',
+            'PORDESCUENTO',
+            'FECHACASTIGO',
+            'EDAD',
+            'RIESGO'
+        ];
+
+        foreach ($finanty_castigo_columns as $column) {
+            add_select_column_if_exists($select_parts, $existing_columns, $column);
+        }
+
+        return $select_parts;
+    }
+
+    /*
+     * C_KIWIPAY
+     * Traemos únicamente los campos necesarios.
+     */
+    if (strtoupper((string)$table_name) === 'C_KIWIPAY') {
+
+        $kiwipay_columns = [
+            'id',
+            'identificador',
+            'documento',
+            'NOMBRE',
+            'DPTO',
+            'PRODUCTO',
+            'ENTIREPORTADAS',
+            'DIASATRASO',
+            'CAPITAL',
+            'DEUDATOTAL',
+            'MONEDA',
+            'MONTOACOBRAR',
+            'CUOPAG',
+            'FECHAULTPA',
+            'FECHAVEN'
+        ];
+
+        foreach ($kiwipay_columns as $column) {
+            add_select_column_if_exists(
+                $select_parts,
+                $existing_columns,
+                $column
+            );
+        }
+
+        return $select_parts;
+    }
+
+    /*
+     * FINANCIERA EFECTIVA CAMPO
+     */
     if ($table_name === 'C_FINANCIERA_EFECTIVA_CAMPO') {
-        foreach ([
+
+        $columns = [
             'id',
             'identificador',
             'documento',
@@ -261,22 +401,64 @@ function build_store_equivalent_select_parts($table_name, array $existing_column
             'FECHAVEN',
             'DPTO',
             'TRAMOINICIAL'
-        ] as $column) {
-            add_select_column_if_exists($select_parts, $existing_columns, $column);
+        ];
+
+        foreach ($columns as $column) {
+            add_select_column_if_exists(
+                $select_parts,
+                $existing_columns,
+                $column
+            );
         }
+
         return $select_parts;
     }
 
-    // Equivalente a GetCuentasGeneral: la consulta ya era SELECT *.
-    if (in_array($table_name, ['C_PICHINCHA_DINERS_REFINANCIADOS', 'C_PICHINCHA_DINERS_NO_REFINANCIADOS', 'C_EFECTIVA_VENTA'], true)) {
+    /*
+     * FINANCIERA CONFIANZA CAMPO
+     */
+    if (is_confianza_campo_table($table_name)) {
+
+        $columns = [
+            'NOMBRE_SUCURSAL_DE_CREDITO',
+            'ESTADOCIV'
+        ];
+
+        foreach ($columns as $column) {
+            add_select_column_if_exists(
+                $select_parts,
+                $existing_columns,
+                $column
+            );
+        }
+    }
+
+    /*
+     * Estas tablas mantienen comportamiento equivalente a SELECT *
+     */
+    if (
+        in_array(
+            $table_name,
+            [
+                'C_PICHINCHA_DINERS_REFINANCIADOS',
+                'C_PICHINCHA_DINERS_NO_REFINANCIADOS',
+                'C_EFECTIVA_VENTA'
+            ],
+            true
+        )
+    ) {
+
         foreach ($existing_columns as $real) {
             $select_parts[] = quote_identifier($real);
         }
+
         return $select_parts;
     }
 
-    // No se usan alias SQL. Se traen columnas físicas y las equivalencias se resuelven en PHP.
-    foreach ([
+    /*
+     * Consulta estándar para el resto de tablas.
+     */
+    $general_columns = [
         'identificador',
         'PRODUCTO',
         'SUBPRODUCTO',
@@ -297,8 +479,14 @@ function build_store_equivalent_select_parts($table_name, array $existing_column
         'MONTOACOBRAR',
         'DEUDATOTAL',
         'CAPITAL'
-    ] as $column) {
-        add_select_column_if_exists($select_parts, $existing_columns, $column);
+    ];
+
+    foreach ($general_columns as $column) {
+        add_select_column_if_exists(
+            $select_parts,
+            $existing_columns,
+            $column
+        );
     }
 
     return $select_parts;
@@ -350,14 +538,16 @@ function get_equivalent_value(array $row_index, $table_name, $campo)
                 $producto = get_row_value($row_index, 'PRODUCTO');
                 $subproducto = get_row_value($row_index, 'SUBPRODUCTO');
                 return trim((string)$producto) !== '' || trim((string)$subproducto) !== ''
-                    ? trim(implode(' - ', array_filter([(string)$producto, (string)$subproducto], static function ($v) { return trim($v) !== ''; })))
+                    ? trim(implode(' - ', array_filter([(string)$producto, (string)$subproducto], static function ($v) {
+                        return trim($v) !== '';
+                    })))
                     : '';
             case 'CAMPANA':
                 return get_row_value($row_index, 'MONTOCAMPANA');
             case 'SALDO':
                 return get_row_value($row_index, 'MONTOACOBRAR');
             case 'VALORCUOTA':
-                return '';
+                return get_row_value($row_index, 'VALORCUOTA');
         }
     }
 
@@ -396,7 +586,7 @@ function field_available_for_display(array $row_index, $table_name, $campo)
     return array_key_exists(strtolower((string)$campo), $row_index);
 }
 
-function fetch_dynamic_accounts(mysqli $mysqli, $table_name, array $gui_config, $dni)
+function fetch_dynamic_accounts(mysqli $mysqli, $table_name, array $gui_config, $dni, $id_table = null)
 {
     if (!is_safe_identifier($table_name)) {
         return false;
@@ -407,7 +597,7 @@ function fetch_dynamic_accounts(mysqli $mysqli, $table_name, array $gui_config, 
         return false;
     }
 
-    $select_parts = build_store_equivalent_select_parts($table_name, $existing_columns);
+    $select_parts = build_store_equivalent_select_parts($table_name, $existing_columns, $gui_config, $id_table);
     if (empty($select_parts)) {
         return false;
     }
@@ -491,6 +681,8 @@ function icon_for_field($campo, $type = 'TEXT')
     if (strpos($campo, 'MONTO') !== false || strpos($campo, 'SALDO') !== false || strpos($campo, 'DEUDA') !== false || strpos($campo, 'CAPITAL') !== false || $type === 'NUMBER') return 'banknote';
     if (strpos($campo, 'CUO') !== false) return 'list-checks';
     if (strpos($campo, 'PRODUCT') !== false) return 'package';
+    if (strpos($campo, 'SUCURSAL') !== false || strpos($campo, 'AGENCIA') !== false) return 'building-2';
+    if (strpos($campo, 'ESTADOCIV') !== false || strpos($campo, 'ESTADO_CIVIL') !== false) return 'users';
     if (strpos($campo, 'TRAMO') !== false || strpos($campo, 'RANGO') !== false || strpos($campo, 'CLUSTER') !== false) return 'layers';
     return 'circle-check';
 }
@@ -504,8 +696,14 @@ function format_gui_value($value, $type, $campo = '')
     $type = strtoupper((string)$type);
     $campo_upper = strtoupper((string)$campo);
     $legacy_numeric_fields = [
-        'MONTOCAMPANA', 'CAMPANA', 'SALDOPORPAGAR', 'DEUDATOTAL',
-        'CAPITAL', 'SALDO', 'MONTOACOBRAR'
+        'MONTOCAMPANA',
+        'CAMPANA',
+        'SALDOPORPAGAR',
+        'DEUDATOTAL',
+        'CAPITAL',
+        'SALDO',
+        'MONTOACOBRAR',
+        'VALORCUOTA'
     ];
 
     if ((in_array($type, ['NUMBER', 'DECIMAL', 'MONEY', 'CURRENCY'], true) || in_array($campo_upper, $legacy_numeric_fields, true)) && is_numeric($value)) {
@@ -531,9 +729,9 @@ function render_one_detail_row($campo, $label, $value, $color, $width = 130, $ty
     echo '</tr>';
 }
 
-function render_dynamic_rows(array $row, array $gui_config, $table_name)
+function render_dynamic_rows(array $row, array $gui_config, $table_name, $id_table = null)
 {
-    if (empty($gui_config)) {
+    if (empty($gui_config) && $table_name !== 'C_FINANTY_CASTIGO') {
         return false;
     }
 
@@ -541,7 +739,45 @@ function render_dynamic_rows(array $row, array $gui_config, $table_name)
     $config_map = gui_config_by_field($gui_config);
     $printed = 0;
 
-    if ($table_name === 'C_FINANCIERA_EFECTIVA_CAMPO') {
+    if (is_inteal_cycweb_table($id_table)) {
+        $inteal_config = $gui_config;
+        usort($inteal_config, static function ($left, $right) {
+            $by_order = ((int)($left['orden'] ?? 0)) <=> ((int)($right['orden'] ?? 0));
+            if ($by_order !== 0) {
+                return $by_order;
+            }
+
+            return ((int)($left['gui'] ?? 0)) <=> ((int)($right['gui'] ?? 0));
+        });
+
+        $display_plan = [];
+        foreach ($inteal_config as $field) {
+            $campo = trim((string)($field['campo'] ?? ''));
+            if ($campo !== '') {
+                $display_plan[] = [$campo];
+            }
+        }
+    } elseif ($table_name === 'C_FINANTY_CASTIGO') {
+        $display_plan = [
+            ['identificador'],
+            ['documento'],
+            ['NOMBRE'],
+            ['DPTO'],
+            ['PRODUCTO'],
+            ['SUBPRODUCTO'],
+            ['SITLABORAL'],
+            ['CAPITAL'],
+            ['DEUDATOTAL'],
+            ['MONEDA'],
+            ['MONTOCAMPANA'],
+            ['PORDESCUENTO'],
+            ['AGENCIA'],
+            ['CALSBS'],
+            ['FECHACASTIGO'],
+            ['EDAD'],
+            ['RIESGO']
+        ];
+    } elseif ($table_name === 'C_FINANCIERA_EFECTIVA_CAMPO') {
         $display_plan = [
             ['documento'],
             ['NOMBRE'],
@@ -555,6 +791,28 @@ function render_dynamic_rows(array $row, array $gui_config, $table_name)
             ['SALDOPORPAGAR'],
             ['DEUDATOTAL'],
             ['CAPITAL']
+        ];
+    } elseif (is_confianza_campo_table($table_name)) {
+        $display_plan = [
+            ['documento'],
+            ['NOMBRE'],
+            ['DPTO'],
+            ['CAMPANA', 'MONTOCAMPANA'],
+            ['TRAMOFINAL'],
+            ['DIASATRASO'],
+            ['CUOPAC'],
+            ['CUOPAG'],
+            ['CUOVEN'],
+            ['CUOPEN'],
+            ['FECHAVEN'],
+            ['MONEDA'],
+            ['VALORCUOTA'],
+            ['FECHAULTPA'],
+            ['SALDO', 'MONTOACOBRAR'],
+            ['DEUDATOTAL'],
+            ['CAPITAL'],
+            ['NOMBRE_SUCURSAL_DE_CREDITO'],
+            ['ESTADOCIV']
         ];
     } elseif (in_array($table_name, ['C_PICHINCHA_DINERS_REFINANCIADOS', 'C_PICHINCHA_DINERS_NO_REFINANCIADOS', 'C_EFECTIVA_VENTA'], true)) {
         $excluded = [
@@ -599,6 +857,7 @@ function render_dynamic_rows(array $row, array $gui_config, $table_name)
             ['DPTO'],
             ['CAMPANA', 'MONTOCAMPANA'],
             ['TRAMOFINAL'],
+            ['ENTIREPORTADAS'],
             ['DIASATRASO'],
             ['CUOPAC'],
             ['CUOPAG'],
@@ -639,6 +898,14 @@ function render_dynamic_rows(array $row, array $gui_config, $table_name)
         }
 
         $alias = $config['alias'] ?? $campo;
+        if ($table_name === 'C_FINANTY_CASTIGO') {
+            $finanty_aliases = [
+                'PORDESCUENTO' => 'DESC',
+                'AGENCIA' => 'Campaña 2',
+                'CALSBS' => 'Monto Campaña 2',
+            ];
+            $alias = $finanty_aliases[$campo] ?? $alias;
+        }
         $color = $config['color'] ?? '';
         $width = $config['width'] ?? 230;
         $type = $config['type'] ?? 'TEXT';
@@ -656,17 +923,18 @@ $id_tabla = $metadata['nombre_tabla'];
 $gui_config = get_gui_config($mysqli, $id_table);
 
 $inicio_query = microtime(true);
-$result = fetch_dynamic_accounts($mysqli, $id_tabla, $gui_config, $dni);
+$result = fetch_dynamic_accounts($mysqli, $id_tabla, $gui_config, $dni, $id_table);
 
 $tiempo_query = microtime(true) - $inicio_query;
 error_log(sprintf('[CONSULTA_CUENTAS] %s → tiempo de query: %.3f s (DNI=%s)', $id_tabla, $tiempo_query, $dni));
 
 if ($result && $result->num_rows > 0) {
+    $es_finanty_castigo = $id_tabla === 'C_FINANTY_CASTIGO';
     render_corporate_assets_once();
     echo '<table class="table table-bordered table-striped tabla-principal">';
     echo '<thead>';
     echo '<tr>';
-    echo '<th>ID</th>';
+    echo '<th>' . ($es_finanty_castigo ? 'NOMBRE' : 'ID') . '</th>';
     echo '<th>PRODUCTO</th>';
     echo '<th>OK</th>';
     echo '</tr>';
@@ -680,10 +948,18 @@ if ($result && $result->num_rows > 0) {
 
         $row_index = build_row_index($row);
         $identificador = get_row_value($row_index, 'identificador');
+
+        $valor_cuota_confianza = fetch_valor_cuota_confianza_campo($mysqli, $identificador, $id_cartera);
+        if ($valor_cuota_confianza !== null) {
+            $row['VALORCUOTA'] = $valor_cuota_confianza;
+            $row_index = build_row_index($row);
+        }
+
         $producto = get_equivalent_value($row_index, $id_tabla, 'PRODUCTO');
+        $nombre = get_row_value($row_index, 'NOMBRE');
 
         echo '<tr>';
-        echo '<td>' . h($identificador) . '</td>';
+        echo '<td>' . h($es_finanty_castigo ? $nombre : $identificador) . '</td>';
         echo '<td>' . h($producto) . '</td>';
         echo '<td><button class="btn btn-ver-detalle ver-detalles-btn" data-id="' . h($identificador) . '"><i data-lucide="eye" style="width:16px;height:16px;"></i></button></td>';
         echo '</tr>';
@@ -694,7 +970,7 @@ if ($result && $result->num_rows > 0) {
         echo '<table class="table table-bordered detalle-tabla">';
         echo '<tbody>';
 
-        render_dynamic_rows($row, $gui_config, $id_tabla);
+        render_dynamic_rows($row, $gui_config, $id_tabla, $id_table);
 
         $url_destino = 'agregargestion2.php?id_tabla=' . urlencode($id_tabla) . '&identificador=' . urlencode((string)$identificador) . '&id_cartera=' . urlencode((string)$id_cartera);
 

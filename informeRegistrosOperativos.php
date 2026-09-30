@@ -754,10 +754,7 @@ if (!in_array($cargoPersonal, $cargosAdmin)) {
 
         const dataLimpia = filteredData.map(row => {
 
-          const baseFoto =
-            location.hostname === "localhost" ?
-            "http://localhost/fotos/" :
-            "https://geocampo.online/fotos/";
+          const baseFoto = new URL('fotos/', window.location.href).href;
 
           return {
             Fecha: row.fecha,

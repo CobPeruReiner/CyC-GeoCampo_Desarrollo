@@ -1,6 +1,10 @@
 <?php
-// Current domain name / ip
-$main_url = getenv('GEOCAMPO_BASE_URL') ?: 'https://geocampo.online';
+// Usa la URL configurada para el despliegue. Si no existe, conserva el mismo
+// origen desde el que el usuario abrió la aplicación (IP, dominio y puerto).
+$configuredBaseUrl = trim((string) getenv('GEOCAMPO_BASE_URL'));
+$requestHost = preg_replace('/[^A-Za-z0-9.:[\]-]/', '', $_SERVER['HTTP_HOST'] ?? '127.0.0.1:4007');
+$requestScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$main_url = rtrim($configuredBaseUrl !== '' ? $configuredBaseUrl : $requestScheme . '://' . $requestHost, '/');
 
 // Obtén los parámetros necesarios
 session_start();
@@ -283,7 +287,7 @@ if ($datos_servicio['success']) {
     </script>
 
     <script>
-        const main_url = "<?php echo getenv('GEOCAMPO_BASE_URL') ?: 'https://geocampo.online'; ?>";
+        const main_url = <?php echo json_encode($main_url); ?>;
 
         if (navigator.geolocation) {
             navigator.geolocation.getCurrentPosition(function(position) {

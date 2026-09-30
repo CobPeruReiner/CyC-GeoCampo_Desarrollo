@@ -95,6 +95,10 @@ if (empty($_SESSION['id'])) {
   exit;
 }
 
+date_default_timezone_set('America/Lima');
+$fechaActualPromesa = date('Y-m-d');
+$ultimoDiaMesPromesa = date('Y-m-t');
+
 $id_tabla       = isset($_GET['id_tabla']) ? $_GET['id_tabla'] : $_SESSION['id_tabla'];
 $identificador  = isset($_GET['identificador']) ? $_GET['identificador'] : '';
 
@@ -135,6 +139,84 @@ if ($resp !== false) {
 } else {
   $direcciones = [];
 }
+
+function obtener_ubigeo_cuenta_gestion(mysqli $mysqli, string $tabla, string $identificador, $idCarteraSolicitada): array
+{
+  $vacio = ['departamento' => '', 'provincia' => '', 'distrito' => '', 'disponible' => false];
+  $tabla = trim($tabla);
+  $identificador = trim($identificador);
+  $idCartera = filter_var($idCarteraSolicitada, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+
+  if ($tabla === '' || $identificador === '' || !preg_match('/^[A-Za-z0-9_]+$/', $tabla)) {
+    return $vacio;
+  }
+
+  try {
+    // La tabla debe estar registrada y activa para evitar consultar identificadores arbitrarios.
+    $stmt = $mysqli->prepare('SELECT id_cartera FROM tabla_log WHERE nombre = ? AND estado = 0 ORDER BY id DESC LIMIT 1');
+    $stmt->bind_param('s', $tabla);
+    $stmt->execute();
+    $contexto = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+    if (!$contexto || ($idCartera && (int)$contexto['id_cartera'] !== $idCartera)) {
+      return $vacio;
+    }
+
+    $stmt = $mysqli->prepare('
+      SELECT COLUMN_NAME
+      FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+    ');
+    $stmt->bind_param('s', $tabla);
+    $stmt->execute();
+    $result = $stmt->get_result();
+    $columnas = [];
+    while ($fila = $result->fetch_assoc()) {
+      $columnas[strtolower((string)$fila['COLUMN_NAME'])] = (string)$fila['COLUMN_NAME'];
+    }
+    $stmt->close();
+
+    $buscarColumna = static function (array $nombres) use ($columnas): ?string {
+      foreach ($nombres as $nombre) {
+        $encontrada = $columnas[strtolower($nombre)] ?? null;
+        if ($encontrada !== null) return $encontrada;
+      }
+      return null;
+    };
+
+    $columnaIdentificador = $buscarColumna(['IDENTIFICADOR']);
+    $campos = [
+      'departamento' => $buscarColumna(['DPTO', 'DEPARTAMENTO']),
+      'provincia' => $buscarColumna(['PROVINCIA']),
+      'distrito' => $buscarColumna(['DISTRITO']),
+    ];
+    if ($columnaIdentificador === null || !array_filter($campos)) {
+      return $vacio;
+    }
+
+    $partesSelect = [];
+    foreach ($campos as $alias => $columna) {
+      $partesSelect[] = $columna === null ? "NULL AS `{$alias}`" : "`{$columna}` AS `{$alias}`";
+    }
+    $consulta = 'SELECT ' . implode(', ', $partesSelect) . " FROM `{$tabla}` WHERE `{$columnaIdentificador}` = ? LIMIT 1";
+    $stmt = $mysqli->prepare($consulta);
+    $stmt->bind_param('s', $identificador);
+    $stmt->execute();
+    $fila = $stmt->get_result()->fetch_assoc() ?: [];
+    $stmt->close();
+
+    foreach (array_keys($vacio) as $clave) {
+      if ($clave !== 'disponible') $vacio[$clave] = trim((string)($fila[$clave] ?? ''));
+    }
+    $vacio['disponible'] = (bool)array_filter([$vacio['departamento'], $vacio['provincia'], $vacio['distrito']]);
+  } catch (Throwable $error) {
+    error_log('[agregargestion2] No se pudo obtener ubigeo de cartera: ' . $error->getMessage());
+  }
+
+  return $vacio;
+}
+
+$ubigeoCuenta = obtener_ubigeo_cuenta_gestion($mysqli, (string)$id_tabla, (string)$identificador, $_GET['id_cartera'] ?? null);
 
 function h($value): string
 {
@@ -449,6 +531,81 @@ function h($value): string
       cursor: not-allowed;
     }
 
+    .ubigeo-summary {
+      display: none;
+      align-items: stretch;
+      gap: 12px;
+      margin: 2px 0 18px;
+      padding: 14px;
+      border: 1px solid #dce5f4;
+      border-radius: 18px;
+      background: linear-gradient(135deg, #f5f9ff, #ffffff);
+    }
+
+    .ubigeo-summary.show {
+      display: flex;
+    }
+
+    .ubigeo-summary-icon {
+      width: 42px;
+      height: 42px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      border-radius: 14px;
+      color: #1769aa;
+      background: #e8f3ff;
+    }
+
+    .ubigeo-summary-content {
+      min-width: 0;
+      flex: 1;
+    }
+
+    .ubigeo-summary-title {
+      margin-bottom: 8px;
+      color: #334155;
+      font-size: .78rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .ubigeo-summary-values {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .ubigeo-summary-value {
+      min-width: 0;
+      padding: 8px 10px;
+      border-radius: 11px;
+      background: #fff;
+      border: 1px solid #e4ebf4;
+    }
+
+    .ubigeo-summary-value span {
+      display: block;
+      margin-bottom: 2px;
+      color: #718096;
+      font-size: .65rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+
+    .ubigeo-summary-value strong {
+      display: block;
+      overflow: hidden;
+      color: #253245;
+      font-size: .8rem;
+      font-weight: 800;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .gps-alert,
     .user-alert {
       display: none;
@@ -483,6 +640,70 @@ function h($value): string
       background: #fff0f1;
       color: #b20d17;
       border: 1px solid rgba(255, 16, 31, .18);
+    }
+
+    .user-alert.ok {
+      background: #eefaf1;
+      color: #146c2e;
+      border: 1px solid #cfeeda;
+    }
+
+    .toast-wrapper {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      z-index: 2000;
+      width: min(92%, 430px);
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+
+    .app-toast {
+      display: none;
+      align-items: center;
+      gap: 10px;
+      border-radius: 18px;
+      padding: 14px 16px;
+      color: #fff;
+      background: var(--corp-dark);
+      box-shadow: 0 18px 44px rgba(21, 26, 36, .24);
+      font-size: .9rem;
+      font-weight: 800;
+      line-height: 1.35;
+    }
+
+    .app-toast.show {
+      display: flex;
+      animation: toastIn .18s ease-out;
+    }
+
+    .app-toast.ok {
+      background: #146c2e;
+    }
+
+    .app-toast.error {
+      background: #b20d17;
+    }
+
+    .app-toast.warn {
+      background: #a34100;
+    }
+
+    .app-toast i {
+      flex: 0 0 auto;
+      font-size: 1.05rem;
+    }
+
+    @keyframes toastIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     .photo-grid {
@@ -662,6 +883,44 @@ function h($value): string
         grid-template-columns: 1fr;
       }
 
+      .ubigeo-summary {
+        align-items: center;
+        gap: 8px;
+        margin: 0 0 14px;
+        padding: 9px 10px;
+        border-radius: 14px;
+      }
+
+      .ubigeo-summary-icon {
+        width: 32px;
+        height: 32px;
+        border-radius: 10px;
+        font-size: .82rem;
+      }
+
+      .ubigeo-summary-title {
+        display: none;
+      }
+
+      .ubigeo-summary-values {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 5px;
+      }
+
+      .ubigeo-summary-value {
+        padding: 6px 7px;
+        border-radius: 8px;
+      }
+
+      .ubigeo-summary-value span {
+        margin-bottom: 1px;
+        font-size: .55rem;
+      }
+
+      .ubigeo-summary-value strong {
+        font-size: .7rem;
+      }
+
       .actions-bar {
         padding: 14px 16px;
       }
@@ -785,6 +1044,18 @@ function h($value): string
             </div>
           </div>
 
+          <aside id="ubigeo-summary" class="ubigeo-summary" aria-live="polite" aria-label="Ubigeo de la cuenta">
+            <span class="ubigeo-summary-icon"><i class="fas fa-map-marker-alt"></i></span>
+            <div class="ubigeo-summary-content">
+              <div class="ubigeo-summary-title">Ubigeo de la cuenta</div>
+              <div class="ubigeo-summary-values">
+                <div class="ubigeo-summary-value"><span>Departamento</span><strong id="ubigeo-departamento">No registrado</strong></div>
+                <div class="ubigeo-summary-value"><span>Provincia</span><strong id="ubigeo-provincia">No registrado</strong></div>
+                <div class="ubigeo-summary-value"><span>Distrito</span><strong id="ubigeo-distrito">No registrado</strong></div>
+              </div>
+            </div>
+          </aside>
+
           <div class="form-row">
             <div class="form-group col-md-4">
               <label for="pisos">Pisos</label>
@@ -812,11 +1083,13 @@ function h($value): string
           <div class="form-row">
             <div class="form-group col-md-4">
               <label for="fecha_promesa">Fecha promesa</label>
-              <input type="date" class="form-control" id="fecha_promesa" name="fecha_promesa" disabled>
+              <input type="date" class="form-control" id="fecha_promesa" name="fecha_promesa" min="<?php echo h($fechaActualPromesa); ?>" max="<?php echo h($ultimoDiaMesPromesa); ?>" aria-describedby="fecha_promesa_feedback" disabled>
+              <div id="fecha_promesa_feedback" class="invalid-feedback" data-default-message="Selecciona la fecha de promesa.">Selecciona la fecha de promesa.</div>
             </div>
             <div class="form-group col-md-4">
               <label for="monto_promesa">Monto promesa</label>
-              <input type="number" class="form-control" id="monto_promesa" name="monto_promesa" placeholder="0.00" min="0.01" step="0.01" disabled>
+              <input type="number" class="form-control" id="monto_promesa" name="monto_promesa" placeholder="0.00" min="0" step="0.01" aria-describedby="monto_promesa_feedback" disabled>
+              <div id="monto_promesa_feedback" class="invalid-feedback" data-default-message="Ingresa el monto de la promesa.">Ingresa el monto de la promesa.</div>
             </div>
             <div class="form-group col-md-4">
               <label for="hora_visita">Hora visita</label>
@@ -869,12 +1142,19 @@ function h($value): string
         </div>
       </div>
     </form>
+
+    <div class="toast-wrapper" aria-live="polite" aria-atomic="true">
+      <div id="app-toast" class="app-toast" role="status"></div>
+    </div>
   </main>
 
   <?php include 'MSsesionExpirada.html'; ?>
 
   <script>
     const main_url = <?php echo json_encode(getenv('GEOCAMPO_BASE_URL') ?: 'https://geocampo.online'); ?>;
+    const fechaMinimaPromesa = <?php echo json_encode($fechaActualPromesa); ?>;
+    const fechaMaximaPromesa = <?php echo json_encode($ultimoDiaMesPromesa); ?>;
+    const ubigeoCuenta = <?php echo json_encode($ubigeoCuenta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
 
     const form = document.getElementById('agregar-gestion-form');
     const btnAdd = document.getElementById('btn-add-gestion');
@@ -882,6 +1162,26 @@ function h($value): string
     const userAlert = document.getElementById('user-alert');
     const gpsAlert = document.getElementById('gps-alert');
     const gpsResumen = document.getElementById('gps-resumen');
+    const appToast = document.getElementById('app-toast');
+    const direccionSelect = document.getElementById('iddireccion');
+    const ubigeoSummary = document.getElementById('ubigeo-summary');
+    let toastTimer = null;
+
+    function showToast(type, message) {
+      if (!appToast) return;
+
+      clearTimeout(toastTimer);
+      const toastType = type || 'warn';
+      const icon = toastType === 'ok' ? 'fa-check-circle' : (toastType === 'error' ? 'fa-exclamation-circle' : 'fa-info-circle');
+
+      appToast.className = 'app-toast show ' + toastType;
+      appToast.innerHTML = `<i class="fas ${icon}"></i><span>${escapeHtml(message)}</span>`;
+
+      toastTimer = setTimeout(function() {
+        appToast.className = 'app-toast';
+        appToast.innerHTML = '';
+      }, 3800);
+    }
 
     function showUserMessage(type, message) {
       userAlert.className = 'user-alert show ' + (type || 'warn');
@@ -901,7 +1201,9 @@ function h($value): string
     function setGpsMessage(type, message) {
       gpsAlert.className = 'gps-alert show ' + type;
       gpsAlert.innerHTML = `<i class="fas fa-location-arrow mt-1"></i><span>${escapeHtml(message)}</span>`;
-      gpsResumen.textContent = type === 'ok' ? 'GPS validado' : 'Requiere atención';
+      if (gpsResumen) {
+        gpsResumen.textContent = type === 'ok' ? 'GPS validado' : 'Requiere atención';
+      }
     }
 
     function escapeHtml(value) {
@@ -940,6 +1242,16 @@ function h($value): string
 
     function hideLabel() {
       return true;
+    }
+
+    function actualizarUbigeoDireccion() {
+      if (!ubigeoSummary) return;
+      const mostrar = Boolean(direccionSelect && direccionSelect.value && ubigeoCuenta && ubigeoCuenta.disponible);
+      ubigeoSummary.classList.toggle('show', mostrar);
+      if (!mostrar) return;
+      document.getElementById('ubigeo-departamento').textContent = ubigeoCuenta.departamento || 'No registrado';
+      document.getElementById('ubigeo-provincia').textContent = ubigeoCuenta.provincia || 'No registrado';
+      document.getElementById('ubigeo-distrito').textContent = ubigeoCuenta.distrito || 'No registrado';
     }
 
     function initGeolocation() {
@@ -1067,6 +1379,27 @@ function h($value): string
         });
     }
 
+    function clearFieldError(input) {
+      if (!input) return;
+      input.setCustomValidity('');
+      input.classList.remove('is-invalid');
+
+      const feedback = document.getElementById(input.id + '_feedback');
+      if (feedback && feedback.dataset.defaultMessage) {
+        feedback.textContent = feedback.dataset.defaultMessage;
+      }
+    }
+
+    function showFieldError(input, feedbackId, message) {
+      if (!input) return;
+      const feedback = document.getElementById(feedbackId);
+      input.setCustomValidity(message);
+      input.classList.add('is-invalid');
+      if (feedback) feedback.textContent = message;
+      input.focus({ preventScroll: true });
+      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
     function configurarPromesa(select) {
       const selectedOption = select.options[select.selectedIndex];
       const promesa = selectedOption ? selectedOption.dataset.promesa : 0;
@@ -1074,6 +1407,8 @@ function h($value): string
       const fechaInput = document.getElementById('fecha_promesa');
 
       document.getElementById('promesa-efecto').value = promesa || 0;
+      clearFieldError(montoInput);
+      clearFieldError(fechaInput);
 
       if (String(promesa) === '1') {
         montoInput.required = true;
@@ -1081,15 +1416,9 @@ function h($value): string
         montoInput.disabled = false;
         fechaInput.disabled = false;
 
-        const hoy = new Date();
-        const yyyy = hoy.getFullYear();
-        const mm = String(hoy.getMonth() + 1).padStart(2, '0');
-        const primerDia = `${yyyy}-${mm}-01`;
-        const ultimoDia = new Date(yyyy, hoy.getMonth() + 1, 0).toISOString().split('T')[0];
-
-        fechaInput.min = primerDia;
-        fechaInput.max = ultimoDia;
-        showUserMessage('warn', 'El efecto seleccionado requiere registrar fecha y monto de promesa.');
+        montoInput.min = '0';
+        fechaInput.min = fechaMinimaPromesa;
+        fechaInput.max = fechaMaximaPromesa;
       } else {
         montoInput.required = false;
         fechaInput.required = false;
@@ -1099,13 +1428,14 @@ function h($value): string
         fechaInput.value = '';
         fechaInput.removeAttribute('min');
         fechaInput.removeAttribute('max');
-        hideUserMessage();
       }
     }
 
     document.getElementById('idaccion').addEventListener('change', function() {
       if (this.value) cargarEfectos(this.value);
     });
+
+    direccionSelect.addEventListener('change', actualizarUbigeoDireccion);
 
     document.getElementById('idefecto').addEventListener('change', function() {
       if (!this.value) return;
@@ -1122,23 +1452,103 @@ function h($value): string
       });
     });
 
+    function setSavingState(isSaving, text) {
+      btnAdd.disabled = isSaving;
+      btnAdd.classList.toggle('loading', isSaving);
+      btnText.textContent = text || (isSaving ? 'Guardando...' : 'Guardar gestión');
+    }
+
+    const fechaPromesaInput = document.getElementById('fecha_promesa');
+    const montoPromesaInput = document.getElementById('monto_promesa');
+
+    fechaPromesaInput.addEventListener('change', function() {
+      clearFieldError(this);
+    });
+
+    montoPromesaInput.addEventListener('input', function() {
+      clearFieldError(this);
+    });
+
     form.addEventListener('submit', function(event) {
+      event.preventDefault();
+      event.stopPropagation();
       hideUserMessage();
 
-      if (!form.checkValidity()) {
-        event.preventDefault();
-        event.stopPropagation();
+      const esPromesaSeleccionada = document.getElementById('promesa-efecto').value === '1';
+      clearFieldError(fechaPromesaInput);
+      clearFieldError(montoPromesaInput);
+
+      if (esPromesaSeleccionada && fechaPromesaInput.value !== '' && fechaPromesaInput.value < fechaMinimaPromesa) {
         form.classList.add('was-validated');
-        showUserMessage('error', 'Completa los campos obligatorios antes de guardar la gestión.');
+        showFieldError(fechaPromesaInput, 'fecha_promesa_feedback', 'Selecciona una fecha desde hoy.');
+        return;
+      }
+
+      if (esPromesaSeleccionada && fechaPromesaInput.value !== '' && fechaPromesaInput.value > fechaMaximaPromesa) {
+        form.classList.add('was-validated');
+        showFieldError(fechaPromesaInput, 'fecha_promesa_feedback', 'Selecciona una fecha dentro de este mes.');
+        return;
+      }
+
+      if (esPromesaSeleccionada && montoPromesaInput.value !== '' && Number(montoPromesaInput.value) < 0) {
+        form.classList.add('was-validated');
+        showFieldError(montoPromesaInput, 'monto_promesa_feedback', 'Ingresa un monto igual o mayor a 0.');
+        return;
+      }
+
+      if (!form.checkValidity()) {
+        form.classList.add('was-validated');
+        showUserMessage('error', 'Revisa los campos señalados antes de guardar.');
         return;
       }
 
       const ahoraUTC = new Date().toISOString();
       document.getElementById('fecha_creacion_dispositivo').value = ahoraUTC;
 
-      btnAdd.disabled = true;
-      btnAdd.classList.add('loading');
-      btnText.textContent = 'Guardando...';
+      setSavingState(true, 'Guardando...');
+
+      const formData = new FormData(form);
+      formData.append('btnAddGestion', '1');
+
+      fetch(form.action, {
+          method: 'POST',
+          body: formData,
+          credentials: 'same-origin',
+          headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          }
+        })
+        .then(async function(response) {
+          const text = await response.text();
+          let data = null;
+
+          try {
+            data = text ? JSON.parse(text) : {};
+          } catch (error) {
+            console.error('Respuesta no JSON de guardargestion.php:', text);
+            throw new Error('El servidor respondió en un formato no esperado.');
+          }
+
+          if (!response.ok || !data.success) {
+            throw new Error(data.message || 'No se pudo guardar la gestión.');
+          }
+
+          return data;
+        })
+        .then(function(data) {
+          const mensaje = data.message || 'Gestión ingresada correctamente.';
+          form.classList.remove('was-validated');
+          showToast('ok', mensaje);
+          setSavingState(false, 'Gestión guardada');
+          btnAdd.disabled = true;
+        })
+        .catch(function(error) {
+          const mensaje = error.message || 'No pudimos guardar la gestión. Inténtalo nuevamente.';
+          console.error('Error al guardar gestión:', error);
+          showUserMessage('error', mensaje);
+          setSavingState(false, 'Guardar gestión');
+        });
     });
 
     initGeolocation();

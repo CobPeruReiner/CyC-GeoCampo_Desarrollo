@@ -25,17 +25,16 @@ if (!isset($mysqli) || $mysqli->connect_error) {
   die("Error conexión BD");
 }
 
-$IS_PROD = getenv('IS_DOCKER') == '1';
-
 /*
 |--------------------------------------------------------------------------
 | URL base de fotos
 |--------------------------------------------------------------------------
 */
 
-$baseURL = $IS_PROD
-  ? "https://geocampo.online/fotos/"
-  : "http://localhost/fotos/";
+$configuredBaseUrl = trim((string) getenv('GEOCAMPO_BASE_URL'));
+$requestHost = preg_replace('/[^A-Za-z0-9.:[\]-]/', '', $_SERVER['HTTP_HOST'] ?? '127.0.0.1:4007');
+$requestScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$baseURL = rtrim($configuredBaseUrl !== '' ? $configuredBaseUrl : $requestScheme . '://' . $requestHost, '/') . '/fotos/';
 
 /*
 |--------------------------------------------------------------------------

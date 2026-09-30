@@ -214,6 +214,59 @@ function obtener_id_usuario(): int
     return $id;
 }
 
+/**
+ * Mis Cuentas belongs to the advisor, not to a hard-coded portfolio. An
+ * advisor can be assigned to more than one table, so resolve the active
+ * table from their assignments (or honour the requested table when present).
+ */
+function obtener_contexto_mis_cuentas(mysqli $mysqli, int $idAsesor, $idTableSolicitado = null): array
+{
+    $idTableSolicitado = (int)($idTableSolicitado ?? 0);
+    $rows = query_all($mysqli, "
+        SELECT tl.id AS id_table, tl.id_cartera, tl.nombre AS tabla, c.cartera,
+               COUNT(*) AS asignadas, MAX(ga.fecha_asignacion) AS ultima_asignacion
+        FROM geocampo_asignacion ga
+        INNER JOIN tabla_log tl ON tl.id = ga.id_table
+        INNER JOIN cartera c ON c.id = ga.id_cartera
+        WHERE ga.activo = 1
+          AND ga.id_asesor = ?
+          AND tl.estado = 0
+          AND c.estado = 1
+          AND (? = 0 OR ga.id_table = ?)
+        GROUP BY tl.id, tl.id_cartera, tl.nombre, c.cartera
+        ORDER BY asignadas DESC, ultima_asignacion DESC, tl.id DESC
+        LIMIT 1
+    ", 'iii', [$idAsesor, $idTableSolicitado, $idTableSolicitado]);
+    if (!$rows) {
+        throw new Exception('No se encontraron cuentas activas asignadas para este asesor.');
+    }
+
+    $ctx = $rows[0];
+    if (!preg_match('/^[A-Za-z0-9_]+$/', (string)$ctx['tabla'])) {
+        throw new Exception('La tabla de cartera asignada no es válida.');
+    }
+    $ctx['id_table'] = (int)$ctx['id_table'];
+    $ctx['id_cartera'] = (int)$ctx['id_cartera'];
+    $ctx['cartera'] = limpiar_texto($ctx['cartera']) ?: "Cartera {$ctx['id_cartera']}";
+    return $ctx;
+}
+
+function nombre_tabla_mis_cuentas(array $ctx): string
+{
+    $tabla = limpiar_texto($ctx['tabla'] ?? '');
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $tabla)) {
+        throw new Exception('Tabla de cartera inválida.');
+    }
+    return "`{$tabla}`";
+}
+
+function fuente_direcciones_mis_cuentas(array $ctx): string
+{
+    $tabla = strtoupper(limpiar_texto($ctx['tabla'] ?? ''));
+    $cartera = strtoupper(limpiar_texto($ctx['cartera'] ?? ''));
+    return ((int)($ctx['id_table'] ?? 0) === 1893 || strpos($tabla, 'CONFIANZA') !== false || strpos($cartera, 'CONFIANZA') !== false) ? '10' : '11';
+}
+
 function obtener_id_catalogo(mysqli $mysqli, string $tabla, string $campoId, string $codigo): int
 {
     $sql = "SELECT {$campoId} AS id FROM {$tabla} WHERE codigo = ? AND activo = 1 LIMIT 1";
@@ -344,7 +397,7 @@ function obtener_order_by(string $criterio): string
     }
 }
 
-function from_mis_cuentas(array $filtros = [], string &$typesFrom = '', array &$paramsFrom = []): string
+function from_mis_cuentas(array $filtros, array $ctx, string &$typesFrom = '', array &$paramsFrom = []): string
 {
     $inicioSemana = limpiar_texto($filtros['fechaInicioSemana'] ?? '');
     $finSemana = limpiar_texto($filtros['fechaFinSemana'] ?? '');
@@ -362,14 +415,16 @@ function from_mis_cuentas(array $filtros = [], string &$typesFrom = '', array &$
     $paramsFrom[] = $inicioSemana . ' 00:00:00';
     $paramsFrom[] = $finSemana . ' 23:59:59';
 
-    // Mis Cuentas actualmente consume FINANCIERA EFECTIVA CAMPO, por eso usa FUENTE 11.
-    $direccionesSql = subquery_direcciones_campo('11');
+    $tablaCuentas = nombre_tabla_mis_cuentas($ctx);
+    $direccionesSql = subquery_direcciones_campo(fuente_direcciones_mis_cuentas($ctx));
 
     return "
         FROM geocampo_asignacion ga
 
-        INNER JOIN C_FINANCIERA_EFECTIVA_CAMPO c
+        INNER JOIN {$tablaCuentas} c
             ON c.id = ga.id_cuenta_campo
+           AND ga.id_table = " . (int)$ctx['id_table'] . "
+           AND ga.id_cartera = " . (int)$ctx['id_cartera'] . "
 
         LEFT JOIN geocampo_hoja_ruta_detalle hrd
             ON hrd.id_detalle = (
@@ -591,7 +646,7 @@ function normalizar_cuenta(array $row): array
     ];
 }
 
-function consultar_mis_cuentas(mysqli $mysqli, int $idAsesor, array $filtros, int $pagina, int $porPagina): array
+function consultar_mis_cuentas(mysqli $mysqli, int $idAsesor, array $filtros, array $ctx, int $pagina, int $porPagina): array
 {
     $pagina = max(1, $pagina);
     $porPagina = in_array($porPagina, [5, 10, 15, 25, 50, 100], true) ? $porPagina : 10;
@@ -602,7 +657,7 @@ function consultar_mis_cuentas(mysqli $mysqli, int $idAsesor, array $filtros, in
     $where = construir_where_mis_cuentas($filtros, $idAsesor, $types, $params);
     $typesFrom = '';
     $paramsFrom = [];
-    $from = from_mis_cuentas($filtros, $typesFrom, $paramsFrom);
+    $from = from_mis_cuentas($filtros, $ctx, $typesFrom, $paramsFrom);
     $queryTypes = $typesFrom . $types;
     $queryParams = array_merge($paramsFrom, $params);
 
@@ -645,15 +700,15 @@ function consultar_mis_cuentas(mysqli $mysqli, int $idAsesor, array $filtros, in
     ];
 }
 
-function cargar_filtros(mysqli $mysqli, int $idAsesor): array
+function cargar_filtros(mysqli $mysqli, int $idAsesor, array $ctx): array
 {
-    // FINANCIERA EFECTIVA CAMPO usa FUENTE 11.
-    $direccionesDistritoSql = subquery_direcciones_campo('11', 'DOC, DISTRITO');
+    $tablaCuentas = nombre_tabla_mis_cuentas($ctx);
+    $direccionesDistritoSql = subquery_direcciones_campo(fuente_direcciones_mis_cuentas($ctx), 'DOC, DISTRITO');
 
     $distritos = query_all($mysqli, "
         SELECT DISTINCT d.DISTRITO AS valor
         FROM geocampo_asignacion ga
-        INNER JOIN C_FINANCIERA_EFECTIVA_CAMPO c 
+        INNER JOIN {$tablaCuentas} c
             ON c.id = ga.id_cuenta_campo
         LEFT JOIN (
             {$direccionesDistritoSql}
@@ -669,7 +724,7 @@ function cargar_filtros(mysqli $mysqli, int $idAsesor): array
     $productos = query_all($mysqli, "
         SELECT DISTINCT c.PRODUCTO AS valor
         FROM geocampo_asignacion ga
-        INNER JOIN C_FINANCIERA_EFECTIVA_CAMPO c ON c.id = ga.id_cuenta_campo
+        INNER JOIN {$tablaCuentas} c ON c.id = ga.id_cuenta_campo
         WHERE ga.activo = 1 AND ga.id_asesor = ? AND c.PRODUCTO IS NOT NULL AND TRIM(c.PRODUCTO) <> ''
         ORDER BY c.PRODUCTO
     ", 'i', [$idAsesor]);
@@ -720,19 +775,21 @@ function cargar_asesor(mysqli $mysqli, int $idAsesor): array
 function cargar_inicial(mysqli $mysqli): void
 {
     $idAsesor = obtener_id_usuario();
+    $ctx = obtener_contexto_mis_cuentas($mysqli, $idAsesor, $_GET['idTable'] ?? null);
     $filtros = obtener_filtros($_GET);
     $filtros['fechaRuta'] = validar_fecha_ruta_diaria($filtros['fechaRuta'] ?: fecha_hoy_peru());
     $pagina = max(1, (int)($_GET['page'] ?? 1));
     $porPagina = max(1, (int)($_GET['perPage'] ?? 10));
 
-    $resultado = consultar_mis_cuentas($mysqli, $idAsesor, $filtros, $pagina, $porPagina);
+    $resultado = consultar_mis_cuentas($mysqli, $idAsesor, $filtros, $ctx, $pagina, $porPagina);
     responder_json([
         'ok' => true,
         'asesor' => cargar_asesor($mysqli, $idAsesor),
-        'filtros' => cargar_filtros($mysqli, $idAsesor),
+        'cartera' => $ctx,
+        'filtros' => cargar_filtros($mysqli, $idAsesor, $ctx),
         'cuentas' => $resultado['cuentas'],
         'paginacion' => $resultado['paginacion'],
-        'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $filtros['fechaRuta']),
+        'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $filtros['fechaRuta'], $ctx),
         'resumen_pendientes' => consultar_resumen_pendientes($mysqli, $idAsesor)
     ]);
 }
@@ -740,17 +797,18 @@ function cargar_inicial(mysqli $mysqli): void
 function cargar_cuentas(mysqli $mysqli): void
 {
     $idAsesor = obtener_id_usuario();
+    $ctx = obtener_contexto_mis_cuentas($mysqli, $idAsesor, $_GET['idTable'] ?? null);
     $filtros = obtener_filtros($_GET);
     $filtros['fechaRuta'] = validar_fecha_ruta_diaria($filtros['fechaRuta'] ?: fecha_hoy_peru());
     $pagina = max(1, (int)($_GET['page'] ?? 1));
     $porPagina = max(1, (int)($_GET['perPage'] ?? 10));
 
-    $resultado = consultar_mis_cuentas($mysqli, $idAsesor, $filtros, $pagina, $porPagina);
+    $resultado = consultar_mis_cuentas($mysqli, $idAsesor, $filtros, $ctx, $pagina, $porPagina);
     responder_json([
         'ok' => true,
         'cuentas' => $resultado['cuentas'],
         'paginacion' => $resultado['paginacion'],
-        'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $filtros['fechaRuta']),
+        'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $filtros['fechaRuta'], $ctx),
         'resumen_pendientes' => consultar_resumen_pendientes($mysqli, $idAsesor)
     ]);
 }
@@ -758,6 +816,7 @@ function cargar_cuentas(mysqli $mysqli): void
 function obtener_ids_filtrados(mysqli $mysqli): void
 {
     $idAsesor = obtener_id_usuario();
+    $ctx = obtener_contexto_mis_cuentas($mysqli, $idAsesor, $_GET['idTable'] ?? null);
     $filtros = obtener_filtros($_GET);
     $filtros['fechaRuta'] = validar_fecha_ruta_diaria($filtros['fechaRuta'] ?: fecha_hoy_peru());
     $types = '';
@@ -765,7 +824,7 @@ function obtener_ids_filtrados(mysqli $mysqli): void
     $where = construir_where_mis_cuentas($filtros, $idAsesor, $types, $params);
     $typesFrom = '';
     $paramsFrom = [];
-    $from = from_mis_cuentas($filtros, $typesFrom, $paramsFrom);
+    $from = from_mis_cuentas($filtros, $ctx, $typesFrom, $paramsFrom);
     $queryTypes = $typesFrom . $types;
     $queryParams = array_merge($paramsFrom, $params);
     $orderBy = obtener_order_by($filtros['criterioRuta']);
@@ -837,6 +896,7 @@ function validar_ids_asignaciones_en_vivo(mysqli $mysqli): void
     if ($idAsesor <= 0) {
         responder_json(['ok' => false, 'message' => 'Asesor inválido.'], 400);
     }
+    $ctx = obtener_contexto_mis_cuentas($mysqli, $idAsesor, $input['idTable'] ?? null);
 
     try {
         $fechaRuta = validar_fecha_ruta_diaria($fechaRuta);
@@ -850,7 +910,7 @@ function validar_ids_asignaciones_en_vivo(mysqli $mysqli): void
             'ok' => true,
             'ids_validos' => [],
             'ids_invalidos' => [],
-            'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $fechaRuta),
+            'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $fechaRuta, $ctx),
             'resumen_pendientes' => consultar_resumen_pendientes($mysqli, $idAsesor)
         ]);
     }
@@ -886,7 +946,7 @@ function validar_ids_asignaciones_en_vivo(mysqli $mysqli): void
         'ok' => true,
         'ids_validos' => $idsValidos,
         'ids_invalidos' => $idsInvalidos,
-        'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $fechaRuta),
+        'ruta_dia' => consultar_ruta_dia($mysqli, $idAsesor, $fechaRuta, $ctx),
         'resumen_pendientes' => consultar_resumen_pendientes($mysqli, $idAsesor)
     ]);
 }
@@ -917,11 +977,12 @@ function obtener_hoja_ruta_activa(mysqli $mysqli, int $idAsesor, string $fechaRu
 }
 
 
-function consultar_ruta_dia(mysqli $mysqli, int $idAsesor, string $fechaRuta): array
+function consultar_ruta_dia(mysqli $mysqli, int $idAsesor, string $fechaRuta, ?array $ctx = null): array
 {
     // Se conserva el nombre de la respuesta como ruta_dia para no romper el JS,
     // pero ahora representa la ruta semanal activa.
     $fechaRuta = validar_fecha_ruta_diaria($fechaRuta);
+    $ctx = $ctx ?? obtener_contexto_mis_cuentas($mysqli, $idAsesor);
     $semana = obtener_rango_semana($fechaRuta);
     $ruta = obtener_hoja_ruta_activa($mysqli, $idAsesor, $fechaRuta);
     if (!$ruta) {
@@ -973,7 +1034,7 @@ function consultar_ruta_dia(mysqli $mysqli, int $idAsesor, string $fechaRuta): a
     ];
     $typesFrom = '';
     $paramsFrom = [];
-    $from = from_mis_cuentas($filtros, $typesFrom, $paramsFrom);
+    $from = from_mis_cuentas($filtros, $ctx, $typesFrom, $paramsFrom);
     $sql = select_campos_mis_cuentas() . "
         {$from}
         WHERE ga.activo = 1

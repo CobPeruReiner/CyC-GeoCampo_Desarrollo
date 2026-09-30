@@ -41,7 +41,9 @@ function debug_tiempos_activo(): bool
 function filtros_requieren_direcciones(array $filtros): bool
 {
     return limpiar_texto($filtros['distrito'] ?? '') !== ''
-        || limpiar_texto($filtros['busqueda'] ?? '') !== '';
+        || limpiar_texto($filtros['busqueda'] ?? '') !== ''
+        || limpiar_texto($filtros['fDireccion'] ?? '') !== ''
+        || limpiar_texto($filtros['fDistrito'] ?? '') !== '';
 }
 
 function obtener_id_catalogo(mysqli $mysqli, string $tabla, string $campoId, string $codigo): int
@@ -96,6 +98,18 @@ function obtener_filtros_desde_array(array $origen): array
         'estado' => limpiar_texto($origen['estado'] ?? ''),
         'pago' => limpiar_texto($origen['pago'] ?? ''),
         'busqueda' => limpiar_texto($origen['busqueda'] ?? ''),
+        'asesor' => limpiar_texto($origen['asesor'] ?? ''),
+        'resumenAsesor' => limpiar_texto($origen['resumenAsesor'] ?? ''),
+        'rutaSemana' => limpiar_texto($origen['rutaSemana'] ?? ''),
+        'fCuenta' => limpiar_texto($origen['fCuenta'] ?? ''),
+        'fCliente' => limpiar_texto($origen['fCliente'] ?? ''),
+        'fDireccion' => limpiar_texto($origen['fDireccion'] ?? ''),
+        'fDistrito' => limpiar_texto($origen['fDistrito'] ?? ''),
+        'fImporte' => limpiar_texto($origen['fImporte'] ?? ''),
+        'fAsesor' => limpiar_texto($origen['fAsesor'] ?? ''),
+        'fEstadoGeneral' => limpiar_texto($origen['fEstadoGeneral'] ?? ''),
+        'fPago' => limpiar_texto($origen['fPago'] ?? ''),
+        'fVisitasSemana' => limpiar_texto($origen['fVisitasSemana'] ?? ''),
     ];
 }
 
@@ -728,6 +742,135 @@ function tooltip_estado_asignacion(string $codigo, string $descripcion = ''): st
     return '(' . $codigoLegible . ')';
 }
 
+function normalizar_valor_estado_asignacion_filtro(string $valor): string
+{
+    $valor = strtoupper(str_replace(' ', '_', trim($valor)));
+    if (strpos($valor, 'ESTADO_ASIG:') === 0) {
+        $valor = substr($valor, strlen('ESTADO_ASIG:'));
+    }
+    return preg_replace('/[^A-Z0-9_]/', '', $valor) ?? '';
+}
+
+function condicion_ruta_semana_activa_sql(): string
+{
+    return "EXISTS (
+        SELECT 1
+        FROM geocampo_hoja_ruta_detalle hrd_f
+        INNER JOIN geocampo_hoja_ruta hr_f
+            ON hr_f.id_hoja_ruta = hrd_f.id_hoja_ruta
+        INNER JOIN geocampo_estado_ruta er_f
+            ON er_f.id_estado_ruta = hr_f.id_estado_ruta
+        LEFT JOIN geocampo_estado_visita ev_f
+            ON ev_f.id_estado_visita = hrd_f.id_estado_visita
+        WHERE hrd_f.id_asignacion = ga.id_asignacion
+          AND er_f.codigo IN ('CREADA', 'EN_PROCESO')
+          AND COALESCE(ev_f.codigo, '') <> 'CANCELADO'
+          AND (
+                (
+                    hr_f.fecha_inicio_semana IS NOT NULL
+                    AND hr_f.fecha_fin_semana IS NOT NULL
+                    AND hr_f.fecha_inicio_semana <= DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 6 DAY)
+                    AND hr_f.fecha_fin_semana >= DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+                )
+                OR (
+                    hr_f.fecha_inicio_semana IS NULL
+                    AND hr_f.fecha_ruta BETWEEN DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY)
+                                         AND DATE_ADD(DATE_SUB(CURDATE(), INTERVAL WEEKDAY(CURDATE()) DAY), INTERVAL 6 DAY)
+                )
+          )
+    )";
+}
+
+function sincronizar_visitas_semana_estado_asignacion(mysqli $mysqli, array $ctx, string $inicioSemana, string $finSemana): void
+{
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $idTable = (int)($ctx['id_table'] ?? 0);
+    $idCarteraCtx = (int)($ctx['id_cartera'] ?? 0);
+
+    if ($idTable <= 0 || $idCarteraCtx <= 0) {
+        return;
+    }
+
+    $sqlAsignacion = "
+        UPDATE geocampo_asignacion ga
+        INNER JOIN {$tablaCuentas} c
+            ON c.id = ga.id_cuenta_campo
+        INNER JOIN GEOCAMPO g
+            ON g.IDCARTERA = ga.id_cartera
+           AND g.IDENTIFICADOR = c.identificador
+           AND g.IDPERSONAL = ga.id_asesor
+           AND g.FECHA >= ?
+           AND g.FECHA < DATE_ADD(?, INTERVAL 1 DAY)
+        INNER JOIN geocampo_estado_asignacion ev_visitado
+            ON ev_visitado.codigo = 'VISITADO'
+           AND ev_visitado.activo = 1
+        LEFT JOIN geocampo_estado_asignacion ea_actual
+            ON ea_actual.id_estado_asignacion = ga.id_estado_asignacion
+        SET ga.id_estado_asignacion = ev_visitado.id_estado_asignacion,
+            ga.fecha_actualizacion = NOW()
+        WHERE ga.activo = 1
+          AND ga.id_table = {$idTable}
+          AND ga.id_cartera = {$idCarteraCtx}
+          AND (ea_actual.codigo IS NULL OR ea_actual.codigo IN ('PENDIENTE', 'AGENDADO', 'REPROGRAMADO'))
+    ";
+
+    if ($stmt = $mysqli->prepare($sqlAsignacion)) {
+        $stmt->bind_param('ss', $inicioSemana, $finSemana);
+        $stmt->execute();
+        $stmt->close();
+    }
+
+    $sqlDetalle = "
+        UPDATE geocampo_hoja_ruta_detalle hrd
+        INNER JOIN geocampo_asignacion ga
+            ON ga.id_asignacion = hrd.id_asignacion
+        INNER JOIN {$tablaCuentas} c
+            ON c.id = ga.id_cuenta_campo
+        INNER JOIN geocampo_hoja_ruta hr
+            ON hr.id_hoja_ruta = hrd.id_hoja_ruta
+        INNER JOIN geocampo_estado_ruta er
+            ON er.id_estado_ruta = hr.id_estado_ruta
+        INNER JOIN geocampo_estado_visita ev_visitado
+            ON ev_visitado.codigo = 'VISITADO'
+           AND ev_visitado.activo = 1
+        LEFT JOIN geocampo_estado_visita ev_actual
+            ON ev_actual.id_estado_visita = hrd.id_estado_visita
+        INNER JOIN GEOCAMPO g
+            ON g.IDCARTERA = ga.id_cartera
+           AND g.IDENTIFICADOR = c.identificador
+           AND g.IDPERSONAL = ga.id_asesor
+           AND g.FECHA >= ?
+           AND g.FECHA < DATE_ADD(?, INTERVAL 1 DAY)
+        SET hrd.id_estado_visita = ev_visitado.id_estado_visita,
+            hrd.fecha_visita = COALESCE(hrd.fecha_visita, g.FECHA),
+            hrd.resultado_visita = COALESCE(NULLIF(hrd.resultado_visita, ''), 'VISITADO'),
+            hrd.fecha_actualizacion = NOW()
+        WHERE ga.activo = 1
+          AND ga.id_table = {$idTable}
+          AND ga.id_cartera = {$idCarteraCtx}
+          AND er.codigo IN ('CREADA', 'EN_PROCESO')
+          AND (ev_actual.codigo IS NULL OR ev_actual.codigo IN ('AGENDADO', 'PENDIENTE_VISITA', 'EN_CAMINO', 'NO_VISITADO'))
+          AND (
+                (
+                    hr.fecha_inicio_semana IS NOT NULL
+                    AND hr.fecha_fin_semana IS NOT NULL
+                    AND DATE(g.FECHA) BETWEEN hr.fecha_inicio_semana AND hr.fecha_fin_semana
+                )
+                OR (
+                    hr.fecha_inicio_semana IS NULL
+                    AND DATE(g.FECHA) BETWEEN DATE_SUB(hr.fecha_ruta, INTERVAL WEEKDAY(hr.fecha_ruta) DAY)
+                                          AND DATE_ADD(DATE_SUB(hr.fecha_ruta, INTERVAL WEEKDAY(hr.fecha_ruta) DAY), INTERVAL 6 DAY)
+                )
+          )
+    ";
+
+    if ($stmt = $mysqli->prepare($sqlDetalle)) {
+        $stmt->bind_param('ss', $inicioSemana, $finSemana);
+        $stmt->execute();
+        $stmt->close();
+    }
+}
+
 function normalizar_cuenta_ruta_supervisor(array $row): array
 {
     $direccionDepurada = limpiar_texto($row['direccion_depurada'] ?? '');
@@ -812,16 +955,114 @@ function construir_where_cuentas(mysqli $mysqli, array $filtros, string &$types,
         $params[] = $filtros['segmento'];
     }
 
-    if ($filtros['estado'] === 'sin_asignar') {
+    $asesorFiltro = (int)($filtros['asesor'] ?? 0);
+    if ($asesorFiltro > 0) {
+        $where[] = "ga.id_asesor = ?";
+        $types .= 'i';
+        $params[] = $asesorFiltro;
+    }
+
+    $estadoFiltro = limpiar_texto($filtros['estado'] ?? '');
+    if ($estadoFiltro === 'sin_asignar') {
         $where[] = "ga.id_asignacion IS NULL";
-    } elseif ($filtros['estado'] === 'asignadas') {
+    } elseif ($estadoFiltro === 'asignadas') {
         $where[] = "ga.id_asignacion IS NOT NULL";
+    } else {
+        $estadoCatalogo = normalizar_valor_estado_asignacion_filtro($estadoFiltro);
+        if ($estadoCatalogo !== '') {
+            $where[] = "ea.codigo = ?";
+            $types .= 's';
+            $params[] = $estadoCatalogo;
+        }
+    }
+
+    $estadoColumna = normalizar_valor_estado_asignacion_filtro($filtros['fEstadoGeneral'] ?? '');
+    if ($estadoColumna === 'SIN_ASIGNAR') {
+        $where[] = "ga.id_asignacion IS NULL";
+    } elseif ($estadoColumna !== '') {
+        $where[] = "ea.codigo = ?";
+        $types .= 's';
+        $params[] = $estadoColumna;
+    }
+
+    if (limpiar_texto($filtros['rutaSemana'] ?? '') === '1') {
+        $where[] = condicion_ruta_semana_activa_sql();
+    }
+
+    if (limpiar_texto($filtros['resumenAsesor'] ?? '') === 'pendientes') {
+        $where[] = "ea.codigo = 'PENDIENTE'";
+    } elseif (limpiar_texto($filtros['resumenAsesor'] ?? '') === 'visitas_semana') {
+        $where[] = "COALESCE(vgs.cantidad_visitas_semana, 0) > 0";
     }
 
     if (($filtros['pago'] ?? '') === 'si_pago') {
         $where[] = $pagoExpr;
     } elseif (($filtros['pago'] ?? '') === 'no_pago') {
         $where[] = "NOT ({$pagoExpr})";
+    }
+
+    if (($filtros['fPago'] ?? '') === 'si_pago') {
+        $where[] = $pagoExpr;
+    } elseif (($filtros['fPago'] ?? '') === 'no_pago') {
+        $where[] = "NOT ({$pagoExpr})";
+    }
+
+    if (($filtros['fVisitasSemana'] ?? '') === 'con_visitas') {
+        $where[] = "COALESCE(vgs.cantidad_visitas_semana, 0) > 0";
+    } elseif (($filtros['fVisitasSemana'] ?? '') === 'sin_visitas') {
+        $where[] = "COALESCE(vgs.cantidad_visitas_semana, 0) = 0";
+    } elseif (is_numeric($filtros['fVisitasSemana'] ?? '')) {
+        $where[] = "COALESCE(vgs.cantidad_visitas_semana, 0) = ?";
+        $types .= 'i';
+        $params[] = (int)$filtros['fVisitasSemana'];
+    }
+
+    if (($filtros['fCuenta'] ?? '') !== '') {
+        $where[] = "(c.NUMEROCUENTA LIKE ? OR c.identificador LIKE ? OR c.documento LIKE ?)";
+        $like = '%' . $filtros['fCuenta'] . '%';
+        $types .= 'sss';
+        array_push($params, $like, $like, $like);
+    }
+
+    if (($filtros['fCliente'] ?? '') !== '') {
+        $where[] = "c.NOMBRE LIKE ?";
+        $types .= 's';
+        $params[] = '%' . $filtros['fCliente'] . '%';
+    }
+
+    if (($filtros['fDireccion'] ?? '') !== '') {
+        $where[] = "(COALESCE(dc.direccion_corregida, '') LIKE ? OR COALESCE(dc.direccion_search, '') LIKE ? OR COALESCE(d.DIRECCION_DEPURADA, '') LIKE ? OR COALESCE(d.DIRECCION, '') LIKE ? OR COALESCE(d.REF_DEPURADA, '') LIKE ? OR COALESCE(d.REF, '') LIKE ?)";
+        $like = '%' . $filtros['fDireccion'] . '%';
+        $types .= 'ssssss';
+        for ($i = 0; $i < 6; $i++) $params[] = $like;
+    }
+
+    if (($filtros['fDistrito'] ?? '') !== '') {
+        $where[] = "(COALESCE(d.DISTRITO, '') LIKE ? OR COALESCE(d.PROVINCIA, '') LIKE ? OR COALESCE(d.DEPARTAMENTO, '') LIKE ? OR COALESCE(dc.distrito_corregido, '') LIKE ? OR COALESCE(dc.ubigeo_corregido, '') LIKE ?)";
+        $like = '%' . $filtros['fDistrito'] . '%';
+        $types .= 'sssss';
+        for ($i = 0; $i < 5; $i++) $params[] = $like;
+    }
+
+    if (($filtros['fImporte'] ?? '') !== '') {
+        $importe = str_replace(',', '.', $filtros['fImporte']);
+        if (preg_match('/^(>=|<=|>|<|=)?\s*([0-9]+(?:\.[0-9]+)?)$/', $importe, $m)) {
+            $op = $m[1] ?: '=';
+            $where[] = "COALESCE(c.MONTOACOBRAR, 0) {$op} ?";
+            $types .= 'd';
+            $params[] = (float)$m[2];
+        } else {
+            $where[] = "CAST(COALESCE(c.MONTOACOBRAR, 0) AS CHAR) LIKE ?";
+            $types .= 's';
+            $params[] = '%' . $filtros['fImporte'] . '%';
+        }
+    }
+
+    if (($filtros['fAsesor'] ?? '') !== '') {
+        $where[] = "(COALESCE(pa.NOMBRES, '') LIKE ? OR COALESCE(pa.APELLIDOS, '') LIKE ? OR TRIM(CONCAT(COALESCE(pa.NOMBRES, ''), ' ', COALESCE(pa.APELLIDOS, ''))) LIKE ?)";
+        $like = '%' . $filtros['fAsesor'] . '%';
+        $types .= 'sss';
+        array_push($params, $like, $like, $like);
     }
 
     if (($filtros['busqueda'] ?? '') !== '') {
@@ -934,7 +1175,7 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
 {
     $tiempoInicio = microtime(true);
     $pagina = max(1, $pagina);
-    $porPagina = in_array($porPagina, [5, 10, 15, 25, 50, 100], true) ? $porPagina : 10;
+    $porPagina = max(1, min(10000, $porPagina));
     $offset = ($pagina - 1) * $porPagina;
     $tablaCuentas = nombre_tabla_sql($ctx);
     $idTable = (int)$ctx['id_table'];
@@ -954,6 +1195,7 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
     $semanaActual = obtener_rango_semana(fecha_hoy_peru());
     $inicioSemana = $mysqli->real_escape_string($semanaActual['fecha_inicio_semana']);
     $finSemana = $mysqli->real_escape_string($semanaActual['fecha_fin_semana']);
+    sincronizar_visitas_semana_estado_asignacion($mysqli, $ctx, $semanaActual['fecha_inicio_semana'], $semanaActual['fecha_fin_semana']);
     $joinDireccionCorregida = construir_join_direccion_corregida($mysqli, $idTable, $idCarteraCtx);
     $requiereDireccionesEnCount = filtros_requieren_direcciones($filtros);
 
@@ -998,6 +1240,8 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             ON d.DOC = c.documento
     " : "";
 
+    $joinDireccionCorregidaCount = $requiereDireccionesEnCount ? $joinDireccionCorregida : "";
+
     $fromCount = "
         FROM {$tablaCuentas} c
         LEFT JOIN cartera car
@@ -1009,7 +1253,22 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
            AND ga.activo = 1
         LEFT JOIN personal pa
             ON pa.IDPERSONAL = ga.id_asesor
+        LEFT JOIN geocampo_estado_asignacion ea
+            ON ea.id_estado_asignacion = ga.id_estado_asignacion
         {$joinDireccionesCount}
+        {$joinDireccionCorregidaCount}
+        LEFT JOIN (
+            SELECT
+                g.IDENTIFICADOR,
+                COUNT(*) AS cantidad_visitas_semana,
+                MAX(g.FECHA) AS ultima_fecha_visita_semana
+            FROM GEOCAMPO g
+            WHERE g.IDCARTERA = {$idCarteraCtx}
+              AND g.FECHA >= '{$inicioSemana}'
+              AND g.FECHA < DATE_ADD('{$finSemana}', INTERVAL 1 DAY)
+            GROUP BY g.IDENTIFICADOR
+        ) vgs
+            ON vgs.IDENTIFICADOR = c.identificador
     ";
 
     $tiempoAntesCount = microtime(true);
@@ -1061,6 +1320,7 @@ function consultar_cuentas_paginadas(mysqli $mysqli, array $filtros, int $pagina
             vgs.ultima_fecha_visita_semana,
             ga.id_asignacion,
             ga.id_asesor AS asesorId,
+            TRIM(CONCAT(COALESCE(pa.NOMBRES, ''), ' ', COALESCE(pa.APELLIDOS, ''))) AS asesor,
             ea.codigo AS estado_codigo,
             COALESCE(ea.descripcion, 'Sin asignar') AS estado_descripcion,
             ea.descripcion AS estado
@@ -1135,8 +1395,11 @@ function cargar_asesores(mysqli $mysqli, array $ctx): array
                    AND ga_sem.id_table = {$idTableCtx}
                    AND ga_sem.id_cartera = {$idCarteraCtx}
                    AND ga_sem.id_asesor = p.IDPERSONAL
+                LEFT JOIN geocampo_estado_visita ev_sem
+                    ON ev_sem.id_estado_visita = hrd_sem.id_estado_visita
                 WHERE hr_sem.id_asesor = p.IDPERSONAL
-                  AND er_sem.codigo NOT IN ('ANULADA', 'CERRADA')
+                  AND er_sem.codigo IN ('CREADA', 'EN_PROCESO')
+                  AND COALESCE(ev_sem.codigo, '') <> 'CANCELADO'
                   AND (
                         (
                             hr_sem.fecha_inicio_semana IS NOT NULL
@@ -1152,7 +1415,17 @@ function cargar_asesores(mysqli $mysqli, array $ctx): array
                   )
             ) AS ruta_semana,
 
-            0 AS pendientes,
+            (
+                SELECT COUNT(*)
+                FROM geocampo_asignacion ga_pend
+                INNER JOIN geocampo_estado_asignacion ea_pend
+                    ON ea_pend.id_estado_asignacion = ga_pend.id_estado_asignacion
+                WHERE ga_pend.id_asesor = p.IDPERSONAL
+                  AND ga_pend.id_table = {$idTableCtx}
+                  AND ga_pend.id_cartera = {$idCarteraCtx}
+                  AND ga_pend.activo = 1
+                  AND ea_pend.codigo = 'PENDIENTE'
+            ) AS pendientes,
 
             (
                 SELECT COUNT(*)
@@ -1174,6 +1447,7 @@ function cargar_asesores(mysqli $mysqli, array $ctx): array
         FROM personal p
         WHERE COALESCE(p.IDESTADO, 1) = 1
           AND p.IDPERSONAL <> ?
+          AND p.CARGO IN (14)
           AND EXISTS (
               SELECT 1
               FROM asignacion_tabla at
@@ -1252,14 +1526,32 @@ function cargar_filtros(mysqli $mysqli, array $ctx): array
         ORDER BY PRODUCTO
     ");
 
+    $estadosAsignacion = query_all($mysqli, "
+        SELECT codigo, descripcion
+        FROM geocampo_estado_asignacion
+        WHERE activo = 1
+        ORDER BY id_estado_asignacion
+    ");
+
+    $estadosFiltro = [
+        ['value' => 'sin_asignar', 'label' => 'Sin asignar'],
+        ['value' => 'asignadas', 'label' => 'Asignadas']
+    ];
+
+    foreach ($estadosAsignacion as $estado) {
+        $codigo = limpiar_texto($estado['codigo'] ?? '');
+        if ($codigo === '') continue;
+        $estadosFiltro[] = [
+            'value' => 'estado_asig:' . $codigo,
+            'label' => $codigo . ' - ' . limpiar_texto($estado['descripcion'] ?? '')
+        ];
+    }
+
     return [
         'carteras' => $tablasCampo,
         'distritos' => array_values(array_filter(array_map(fn($r) => limpiar_texto($r['valor']), $distritos))),
         'segmentos' => array_values(array_filter(array_map(fn($r) => limpiar_texto($r['valor']), $segmentos))),
-        'estados' => [
-            ['value' => 'sin_asignar', 'label' => 'Sin asignar'],
-            ['value' => 'asignadas', 'label' => 'Asignadas']
-        ],
+        'estados' => $estadosFiltro,
         'pagos' => [
             ['value' => 'si_pago', 'label' => 'Sí pago'],
             ['value' => 'no_pago', 'label' => 'No pago']
@@ -1801,6 +2093,21 @@ function procesar_asignacion_ids(mysqli $mysqli, array $ids, int $idAsesor, int 
     $idTable = (int)$ctx['id_table'];
     $idCarteraCtx = (int)$ctx['id_cartera'];
 
+    // La cartera puede recargarse y regenerar sus IDs internos mientras la
+    // pantalla de asignación sigue abierta. No conservamos referencias a
+    // cuentas que ya no pertenecen a la tabla vigente.
+    $tablaCuentas = nombre_tabla_sql($ctx);
+    $placeholdersCuentas = implode(',', array_fill(0, count($ids), '?'));
+    $cuentasVigentes = query_all(
+        $mysqli,
+        "SELECT id FROM {$tablaCuentas} WHERE id IN ({$placeholdersCuentas})",
+        str_repeat('i', count($ids)),
+        $ids
+    );
+    if (count($cuentasVigentes) !== count($ids)) {
+        throw new Exception('Una o más cuentas ya no están disponibles en la cartera actual. Actualiza la lista antes de asignar.');
+    }
+
     // Regla de umbral abierto: se permite reasignar aunque la cuenta tenga ruta o visitas previas.
     // La ruta histórica queda como trazabilidad de la asignación anterior y la nueva asignación queda activa.
 
@@ -2023,6 +2330,71 @@ function asignar(mysqli $mysqli): void
     }
 }
 
+
+function limpiar_excel($valor): string
+{
+    return htmlspecialchars((string)($valor ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function exportar_excel_asignar_cuentas(mysqli $mysqli): void
+{
+    $filtros = obtener_filtros_desde_array($_GET);
+    $ctx = obtener_contexto_cartera($mysqli, $filtros['cartera']);
+    $resultado = consultar_cuentas_paginadas($mysqli, $filtros, 1, 10000, $ctx);
+    $cuentasExportar = $resultado['cuentas'] ?? [];
+    $nombreArchivo = 'asignar_cuentas_' . date('Ymd_His') . '.xls';
+
+    header('Content-Type: application/vnd.ms-excel; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $nombreArchivo . '"');
+    header('Cache-Control: max-age=0');
+
+    echo "\xEF\xBB\xBF";
+    echo '<html><head><meta charset="UTF-8"></head><body>';
+    echo '<table border="1">';
+    echo '<tr style="font-weight:bold;background:#f2f2f2">';
+    $headers = [
+        'Cuenta', 'Identificador', 'Documento', 'Cliente', 'Producto / Segmento',
+        'Dirección', 'Distrito', 'Ubigeo', 'Importe', 'Asesor actual',
+        'Estado general', 'Descripción estado', 'Pago', 'Fecha pago', 'Monto pago',
+        'Visitas semana', 'Última visita semana', 'Coordenadas'
+    ];
+    foreach ($headers as $header) {
+        echo '<td>' . limpiar_excel($header) . '</td>';
+    }
+    echo '</tr>';
+
+    foreach ($cuentasExportar as $cuenta) {
+        echo '<tr>';
+        $valores = [
+            $cuenta['cuenta'] ?? '',
+            $cuenta['identificador'] ?? '',
+            $cuenta['documento'] ?? '',
+            $cuenta['cliente'] ?? '',
+            $cuenta['segmento'] ?? '',
+            $cuenta['direccion_sugerida'] ?? ($cuenta['direccion'] ?? ''),
+            $cuenta['distrito'] ?? '',
+            $cuenta['ubigeo'] ?? '',
+            $cuenta['importe'] ?? 0,
+            isset($cuenta['asesorId']) && $cuenta['asesorId'] ? ($cuenta['asesorId'] . ' - ' . ($cuenta['asesor'] ?? '')) : 'Sin asignar',
+            $cuenta['estado_codigo'] ?? '',
+            $cuenta['estado_descripcion'] ?? '',
+            $cuenta['estado_pago'] ?? '',
+            $cuenta['fecha_pago'] ?? '',
+            $cuenta['monto_pago'] ?? 0,
+            $cuenta['visitas_semana'] ?? 0,
+            $cuenta['ultima_fecha_visita_semana'] ?? '',
+            (($cuenta['latitud'] ?? 0) && ($cuenta['longitud'] ?? 0)) ? (($cuenta['latitud'] ?? '') . ', ' . ($cuenta['longitud'] ?? '')) : ''
+        ];
+        foreach ($valores as $valor) {
+            echo '<td>' . limpiar_excel($valor) . '</td>';
+        }
+        echo '</tr>';
+    }
+
+    echo '</table></body></html>';
+    exit;
+}
+
 function asignar_filtradas(mysqli $mysqli): void
 {
     $input = json_decode(file_get_contents('php://input'), true);
@@ -2059,6 +2431,10 @@ function asignar_filtradas(mysqli $mysqli): void
 
 try {
     $action = $_GET['action'] ?? '';
+
+    if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'exportar_excel') {
+        exportar_excel_asignar_cuentas($mysqli);
+    }
 
     if ($_SERVER['REQUEST_METHOD'] === 'GET' && $action === 'inicial') {
         cargar_inicial($mysqli);

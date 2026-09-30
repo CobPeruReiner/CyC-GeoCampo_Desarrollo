@@ -15,6 +15,8 @@ let filtrosBackend = {
 
 let cuentasSeleccionadas = [];
 let asesorSeleccionadoId = null;
+let asesorFiltroReporteId = null;
+let resumenAsesorFiltro = "";
 
 let paginaActual = 1;
 let cuentasPorPagina = 10;
@@ -336,6 +338,32 @@ function formatoMoneda(valor) {
 
 function valorInput(selector) {
   return String($(selector)?.value || "").trim();
+}
+
+function valorCabecera(selector) {
+  return String($(selector)?.value || "").trim();
+}
+
+function limpiarFiltrosCabecera() {
+  [
+    "#fColCuenta",
+    "#fColCliente",
+    "#fColDireccion",
+    "#fColDistrito",
+    "#fColImporte",
+    "#fColAsesor",
+    "#fColEstado",
+    "#fColPago",
+    "#fColVisitas",
+  ].forEach((selector) => {
+    const elemento = $(selector);
+    if (elemento) elemento.value = "";
+  });
+}
+
+function limpiarFiltroResumenAsesor() {
+  asesorFiltroReporteId = null;
+  resumenAsesorFiltro = "";
 }
 
 function partesUnicas(partes) {
@@ -987,12 +1015,14 @@ function normalizarPaginaAsesores() {
 }
 
 function setSelectLoading(select) {
+  if (!select) return;
   select.innerHTML = `<option value="">Cargando...</option>`;
   select.disabled = true;
   select.classList.add("animate-pulse", "bg-gray-100", "cursor-wait");
 }
 
 function setSelectOptions(select, opciones, placeholder = "Todos") {
+  if (!select) return;
   select.innerHTML = `<option value="">${escaparHTML(placeholder)}</option>`;
 
   opciones.forEach((opcion) => {
@@ -1018,11 +1048,13 @@ function actualizarFiltrosDependientes(filtros, mantenerValores = true) {
   const distritoActual = $("#filtroDistrito")?.value || "";
   const segmentoActual = $("#filtroSegmento")?.value || "";
   const estadoActual = $("#filtroEstado")?.value || "";
+  const estadoColActual = $("#fColEstado")?.value || "";
   const pagoActual = $("#filtroPago")?.value || "";
 
   setSelectOptions($("#filtroDistrito"), filtros.distritos || [], "Todos");
   setSelectOptions($("#filtroSegmento"), filtros.segmentos || [], "Todos");
   setSelectOptions($("#filtroEstado"), filtros.estados || [], "Todos");
+  if ($("#fColEstado")) setSelectOptions($("#fColEstado"), filtros.estados || [], "Todos");
   setSelectOptions($("#filtroPago"), filtros.pagos || [], "Todos");
 
   if (mantenerValores) {
@@ -1032,6 +1064,8 @@ function actualizarFiltrosDependientes(filtros, mantenerValores = true) {
       $("#filtroSegmento").value = segmentoActual;
     if (valorExisteEnOpciones($("#filtroEstado"), estadoActual))
       $("#filtroEstado").value = estadoActual;
+    if (valorExisteEnOpciones($("#fColEstado"), estadoColActual))
+      $("#fColEstado").value = estadoColActual;
     if (valorExisteEnOpciones($("#filtroPago"), pagoActual))
       $("#filtroPago").value = pagoActual;
   }
@@ -1054,6 +1088,17 @@ function setControlesDisabled(disabled) {
     "#filtroSegmento",
     "#filtroEstado",
     "#filtroPago",
+    "#fColCuenta",
+    "#fColCliente",
+    "#fColDireccion",
+    "#fColDistrito",
+    "#fColImporte",
+    "#fColAsesor",
+    "#fColEstado",
+    "#fColPago",
+    "#fColVisitas",
+    "#btnLimpiarCabeceras",
+    "#btnExportarExcel",
     "#btnLimpiarFiltros",
     "#checkTodos",
     "#btnCantidadPagina",
@@ -1076,6 +1121,18 @@ function obtenerFiltros() {
     estado: $("#filtroEstado").value,
     pago: $("#filtroPago") ? $("#filtroPago").value : "",
     busqueda: $("#busquedaGlobal") ? $("#busquedaGlobal").value.trim() : "",
+    asesor: asesorFiltroReporteId || "",
+    resumenAsesor: resumenAsesorFiltro || "",
+    rutaSemana: resumenAsesorFiltro === "ruta_semana" ? "1" : "",
+    fCuenta: valorCabecera("#fColCuenta"),
+    fCliente: valorCabecera("#fColCliente"),
+    fDireccion: valorCabecera("#fColDireccion"),
+    fDistrito: valorCabecera("#fColDistrito"),
+    fImporte: valorCabecera("#fColImporte"),
+    fAsesor: valorCabecera("#fColAsesor"),
+    fEstadoGeneral: valorCabecera("#fColEstado"),
+    fPago: valorCabecera("#fColPago"),
+    fVisitasSemana: valorCabecera("#fColVisitas"),
   };
 }
 
@@ -1290,6 +1347,29 @@ function renderCuentas() {
   });
 }
 
+function aplicarFiltroResumenAsesor(asesorId, tipo) {
+  asesorSeleccionadoId = Number(asesorId);
+  asesorFiltroReporteId = Number(asesorId);
+  resumenAsesorFiltro = String(tipo || "");
+
+  limpiarFiltrosCabecera();
+
+  if ($("#filtroEstado")) $("#filtroEstado").value = "";
+  if ($("#fColVisitas")) $("#fColVisitas").value = "";
+
+  if (resumenAsesorFiltro === "asignadas") {
+    if ($("#filtroEstado")) $("#filtroEstado").value = "asignadas";
+  } else if (resumenAsesorFiltro === "pendientes") {
+    if ($("#filtroEstado")) $("#filtroEstado").value = "estado_asig:PENDIENTE";
+  } else if (resumenAsesorFiltro === "visitas_semana") {
+    if ($("#fColVisitas")) $("#fColVisitas").value = "con_visitas";
+  }
+
+  cuentasSeleccionadas = [];
+  paginaActual = 1;
+  cargarCuentas();
+}
+
 function renderAsesores() {
   if (cargandoInicial || cargandoCuentas) {
     const totalAsesores = $("#totalAsesores");
@@ -1343,19 +1423,19 @@ function renderAsesores() {
               ${seleccionado ? `<span class="shrink-0 text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded-full">SELECCIONADO</span>` : ""}
             </div>
 
-            <div class="grid grid-cols-2 gap-1.5 mt-2 text-[11px]" title="Resumen operativo del asesor">
-              <span class="rounded-lg border border-gray-100 bg-gray-50 px-2 py-1 text-gray-600">
+            <div class="grid grid-cols-2 gap-1.5 mt-2 text-[11px]" title="Clic para filtrar el reporte por este asesor y estado">
+              <button type="button" class="resumenAsesorFiltro text-left rounded-lg border border-gray-100 bg-gray-50 px-2 py-1 text-gray-600 hover:ring-2 hover:ring-gray-200" data-id="${asesor.id}" data-resumen="asignadas">
                 <strong class="text-gray-800">${Number(asesor.asignadas || 0)}</strong> Asignadas
-              </span>
-              <span class="rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-blue-700">
+              </button>
+              <button type="button" class="resumenAsesorFiltro text-left rounded-lg border border-blue-100 bg-blue-50 px-2 py-1 text-blue-700 hover:ring-2 hover:ring-blue-100" data-id="${asesor.id}" data-resumen="ruta_semana">
                 <strong>${Number(asesor.ruta_semana ?? asesor.ruta_hoy ?? 0)}</strong> Ruta semana
-              </span>
-              <span class="rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 text-amber-700">
+              </button>
+              <button type="button" class="resumenAsesorFiltro text-left rounded-lg border border-amber-100 bg-amber-50 px-2 py-1 text-amber-700 hover:ring-2 hover:ring-amber-100" data-id="${asesor.id}" data-resumen="pendientes">
                 <strong>${Number(asesor.pendientes || 0)}</strong> Pendientes
-              </span>
-              <span class="rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1 text-emerald-700">
+              </button>
+              <button type="button" class="resumenAsesorFiltro text-left rounded-lg border border-emerald-100 bg-emerald-50 px-2 py-1 text-emerald-700 hover:ring-2 hover:ring-emerald-100" data-id="${asesor.id}" data-resumen="visitas_semana">
                 <strong>${Number(asesor.visitas_semana ?? asesor.visitas_hoy ?? asesor.visitas ?? 0)}</strong> Visitas semana
-              </span>
+              </button>
             </div>
 
             ${
@@ -1406,6 +1486,14 @@ function renderAsesores() {
       `;
     })
     .join("");
+
+  document.querySelectorAll(".resumenAsesorFiltro").forEach((btn) => {
+    btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (asignando || cargandoCuentas) return;
+      aplicarFiltroResumenAsesor(Number(btn.dataset.id), btn.dataset.resumen);
+    });
+  });
 
   document.querySelectorAll(".btnVerRutaAsesor").forEach((btn) => {
     btn.addEventListener("click", (event) => {
@@ -1598,6 +1686,10 @@ function actualizarEstadoBotones() {
     !tieneAsesor;
   $("#btnLimpiarFiltros").disabled =
     cargandoInicial || asignando || seleccionGlobalCargando;
+  if ($("#btnExportarExcel")) {
+    $("#btnExportarExcel").disabled =
+      cargandoInicial || cargandoCuentas || asignando || paginacion.total === 0;
+  }
 }
 
 function renderBotones() {
@@ -1780,6 +1872,7 @@ async function cargarDatosIniciales() {
     setSelectLoading($("#filtroDistrito"));
     setSelectLoading($("#filtroSegmento"));
     setSelectLoading($("#filtroEstado"));
+    if ($("#fColEstado")) setSelectLoading($("#fColEstado"));
 
     $("#filtroFecha").disabled = true;
     $("#filtroFechaHasta").disabled = true;
@@ -2106,6 +2199,12 @@ function ocultarToast() {
   toast.classList.remove("flex");
 }
 
+function exportarExcel() {
+  if (cargandoInicial || cargandoCuentas || asignando || paginacion.total === 0) return;
+  const query = construirQueryParams({ action: "exportar_excel", ...obtenerFiltros() });
+  window.location.href = `geocampo_api.php?${query}`;
+}
+
 function cambiarPagina(page) {
   const nuevaPagina = Math.min(Math.max(1, page), paginacion.totalPaginas);
   if (nuevaPagina === paginaActual || cargandoCuentas || asignando) return;
@@ -2171,6 +2270,8 @@ $("#btnLimpiarFiltros").addEventListener("click", () => {
   $("#filtroEstado").value = "";
   if ($("#filtroPago")) $("#filtroPago").value = "";
   $("#busquedaGlobal").value = "";
+  limpiarFiltrosCabecera();
+  limpiarFiltroResumenAsesor();
 
   cuentasSeleccionadas = [];
   paginaActual = 1;
@@ -2183,6 +2284,34 @@ $("#btnCantidadPagina").addEventListener("click", () => {
   if (asignando || cargandoInicial || cargandoCuentas) return;
   modalCantidadPaginaAbierto = !modalCantidadPaginaAbierto;
   renderPaginacion();
+});
+
+if ($("#btnExportarExcel")) {
+  $("#btnExportarExcel").addEventListener("click", exportarExcel);
+}
+
+if ($("#btnLimpiarCabeceras")) {
+  $("#btnLimpiarCabeceras").addEventListener("click", () => {
+    limpiarFiltrosCabecera();
+    limpiarFiltroResumenAsesor();
+    cuentasSeleccionadas = [];
+    paginaActual = 1;
+    cargarCuentas();
+  });
+}
+
+document.querySelectorAll(".filtroCabecera").forEach((elemento) => {
+  const evento = elemento.tagName === "SELECT" ? "change" : "input";
+  elemento.addEventListener(evento, () => {
+    clearTimeout(busquedaTimer);
+    busquedaTimer = setTimeout(() => {
+      asesorFiltroReporteId = asesorFiltroReporteId || null;
+      resumenAsesorFiltro = resumenAsesorFiltro || "";
+      cuentasSeleccionadas = [];
+      paginaActual = 1;
+      cargarCuentas();
+    }, evento === "change" ? 0 : 350);
+  });
 });
 
 document.querySelectorAll(".cantidadPaginaOpcion").forEach((opcion) => {
@@ -2225,6 +2354,8 @@ document.addEventListener("click", (event) => {
       $("#filtroSegmento").value = "";
       $("#filtroEstado").value = "";
       if ($("#filtroPago")) $("#filtroPago").value = "";
+      limpiarFiltrosCabecera();
+      limpiarFiltroResumenAsesor();
     }
 
     cuentasSeleccionadas = [];

@@ -44,7 +44,7 @@ if (empty($_SESSION['id'])) {
 </head>
 
 <body class="bg-gray-100 min-h-screen">
-    <div class="max-w-[1900px] mx-auto p-6 flex flex-col gap-6">
+    <div class="p-6 flex flex-col gap-6">
         <!-- HEADER -->
         <div class="bg-white shadow rounded-xl p-4 flex justify-between items-center">
             <div class="head-left flex flex-col md:flex-row items-center gap-2">

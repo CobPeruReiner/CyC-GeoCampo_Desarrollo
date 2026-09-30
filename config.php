@@ -1,16 +1,16 @@
 <?php
 
 // CRDENCIALES DB LOCAL
-$database = 'SISTEMAGEST_DESARROLLO';
-$host = '192.168.1.39';
-$username = 'raul';
-$password = "loquecallamoslosadmin1";
+$database = 'SISTEMAGEST';
+$host = '192.168.1.36';
+$username = 'geocampo';
+$password = "hibZoX!wf./Ow_0T";
 
 // CRDENCIALES DB LOCAL
 // $database = 'SISTEMAGEST';
 // $host = '192.168.1.31';
-// $username = 'cycwebcob';
-// $password = "k4&{'Ba7Np1";
+// $username = 'geocampo';
+// $password = "hibZoX!wf./Ow_0T";
 
 // CREDENCIALES DB AMAZON
 // $database = 'SISTEMAGEST_CONTINGENCIA';

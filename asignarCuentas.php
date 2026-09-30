@@ -169,7 +169,7 @@ if (empty($_SESSION['id'])) {
             <div class="space-y-1.5">
               <label for="filtroEstado" class="flex items-center gap-1.5 text-xs font-medium text-gray-600">
                 <i data-lucide="user-check" class="w-3.5 h-3.5 text-gray-400"></i>
-                Asesor / Estado
+                Estado asignación
               </label>
               <select id="filtroEstado" disabled
                 class="w-full h-10 rounded-xl bg-gray-50 border border-gray-200 px-3 text-xs text-gray-800 outline-none focus:bg-white focus:border-[#FF161A] focus:ring-4 focus:ring-red-50 disabled:opacity-60 transition">
@@ -199,12 +199,17 @@ if (empty($_SESSION['id'])) {
         <!-- Tabla -->
         <div class="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
 
-          <div class="px-4 py-4 border-b border-gray-100 flex items-center justify-between">
+          <div class="px-4 py-4 border-b border-gray-100 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-2">
               <span class="w-2 h-2 rounded-full bg-[#8B0000]"></span>
               <h2 class="text-sm">Cuentas / Registros Encontrados</h2>
               <span id="totalCuentas" class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">0</span>
             </div>
+            <button id="btnExportarExcel" type="button" disabled
+              class="h-9 px-3 inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-100 bg-emerald-50 text-emerald-700 text-xs font-semibold hover:bg-emerald-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition">
+              <i data-lucide="file-spreadsheet" class="w-3.5 h-3.5"></i>
+              Exportar Excel
+            </button>
           </div>
 
           <div class="px-4 py-3 bg-white flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -290,6 +295,40 @@ if (empty($_SESSION['id'])) {
                   <th class="px-3 py-3 text-left">Pago</th>
                   <th class="px-3 py-3 text-left">Visitas Semana</th>
                   <th class="px-3 py-3 text-left">Acción</th>
+                </tr>
+                <tr class="bg-white border-t border-gray-100">
+                  <th class="px-4 py-2"></th>
+                  <th class="px-3 py-2"><input id="fColCuenta" class="filtroCabecera w-28 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]" placeholder="Filtrar"></th>
+                  <th class="px-3 py-2"><input id="fColCliente" class="filtroCabecera w-40 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]" placeholder="Filtrar"></th>
+                  <th class="px-3 py-2"><input id="fColDireccion" class="filtroCabecera w-44 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]" placeholder="Filtrar"></th>
+                  <th class="px-3 py-2"><input id="fColDistrito" class="filtroCabecera w-36 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]" placeholder="Filtrar"></th>
+                  <th class="px-3 py-2"><input id="fColImporte" class="filtroCabecera w-24 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]" placeholder=">=300"></th>
+                  <th class="px-3 py-2"><input id="fColAsesor" class="filtroCabecera w-36 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]" placeholder="Filtrar"></th>
+                  <th class="px-3 py-2">
+                    <select id="fColEstado" class="filtroCabecera w-36 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]">
+                      <option value="">Todos</option>
+                    </select>
+                  </th>
+                  <th class="px-3 py-2">
+                    <select id="fColPago" class="filtroCabecera w-28 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]">
+                      <option value="">Todos</option>
+                      <option value="si_pago">Pago</option>
+                      <option value="no_pago">NP</option>
+                    </select>
+                  </th>
+                  <th class="px-3 py-2">
+                    <select id="fColVisitas" class="filtroCabecera w-32 rounded-lg border border-gray-200 px-2 py-1 text-[11px] outline-none focus:border-[#FF161A]">
+                      <option value="">Todos</option>
+                      <option value="con_visitas">Con visitas</option>
+                      <option value="sin_visitas">Sin visitas</option>
+                    </select>
+                  </th>
+                  <th class="px-3 py-2">
+                    <button id="btnLimpiarCabeceras" type="button" class="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-2 py-1 text-[11px] text-gray-500 hover:bg-gray-50">
+                      <i data-lucide="eraser" class="w-3 h-3"></i>
+                      Limpiar
+                    </button>
+                  </th>
                 </tr>
               </thead>
 
