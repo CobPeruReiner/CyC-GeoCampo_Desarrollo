@@ -874,7 +874,6 @@ function h($value): string
       }
 
       .ubigeo-summary {
-        align-items: flex-start;
         gap: 7px;
         margin-top: 7px;
         font-size: .74rem;
@@ -1380,8 +1379,13 @@ function h($value): string
       input.setCustomValidity(message);
       input.classList.add('is-invalid');
       if (feedback) feedback.textContent = message;
-      input.focus({ preventScroll: true });
-      input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      input.focus({
+        preventScroll: true
+      });
+      input.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
     }
 
     function configurarPromesa(select) {

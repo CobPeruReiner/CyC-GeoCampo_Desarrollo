@@ -10,53 +10,416 @@
   --r2-amber: #a66500;
 }
 
-.ruta-asesor2-page { background: var(--r2-bg); color: var(--r2-ink); min-height: 100vh; font-family: "Montserrat", Arial, sans-serif; }
-.ruta-asesor2-shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 32px 0 48px; }
-.ruta-asesor2-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 34px 38px; color: #fff; border-radius: 20px; background: linear-gradient(120deg, var(--r2-red-dark), var(--r2-red)); box-shadow: 0 18px 36px rgba(159, 16, 23, .2); }
-.ruta-asesor2-eyebrow { display: block; margin-bottom: 10px; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; opacity: .82; }
-.ruta-asesor2-hero h1 { margin: 0; color: #fff; font-size: clamp(26px, 3vw, 38px); font-weight: 700; }
-.ruta-asesor2-hero p { max-width: 620px; margin: 9px 0 0; font-size: 15px; opacity: .9; }
-.ruta-asesor2-back { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.5); border-radius: 10px; padding: 11px 15px; color: #fff; font-size: 13px; font-weight: 700; text-decoration: none; }
-.ruta-asesor2-back:hover { color: #fff; background: rgba(255,255,255,.16); text-decoration: none; }
-.ruta-asesor2-toolbar, .ruta-asesor2-panel { margin-top: 22px; border: 1px solid var(--r2-line); border-radius: 16px; background: var(--r2-surface); box-shadow: 0 7px 24px rgba(27, 37, 47, .05); }
-.ruta-asesor2-toolbar { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 20px 24px; }
-.ruta-asesor2-toolbar > div { width: min(310px, 100%); }
-.ruta-asesor2-field-label { display: block; margin-bottom: 7px; color: var(--r2-muted); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.ruta-asesor2-toolbar input { height: 44px; border: 1px solid #d6dbe0; border-radius: 9px; font-weight: 700; }
-.ruta-asesor2-toolbar p { margin: 0 0 11px; color: var(--r2-muted); font-size: 13px; }
-.ruta-asesor2-toolbar p i { color: var(--r2-red); }
-.ruta-asesor2-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 22px; }
-.ruta-asesor2-stat { padding: 18px 20px; border-radius: 14px; background: var(--r2-surface); border: 1px solid var(--r2-line); }
-.ruta-asesor2-stat strong { display: block; margin-bottom: 4px; font-size: 26px; line-height: 1; }
-.ruta-asesor2-stat span { color: var(--r2-muted); font-size: 12px; font-weight: 700; }
-.ruta-asesor2-stat i { float: right; color: var(--r2-red); font-size: 20px; }
-.ruta-asesor2-panel { overflow: hidden; }
-.ruta-asesor2-panel-heading { display: flex; align-items: center; justify-content: space-between; padding: 20px 24px; border-bottom: 1px solid var(--r2-line); }
-.ruta-asesor2-panel-heading > div { display: flex; align-items: center; gap: 12px; }
-.ruta-asesor2-panel-icon { display: grid; place-items: center; width: 39px; height: 39px; border-radius: 11px; color: var(--r2-red); background: #fff0f0; }
-.ruta-asesor2-panel h2 { margin: 0; font-size: 17px; font-weight: 700; }
-.ruta-asesor2-panel p { margin: 3px 0 0; color: var(--r2-muted); font-size: 12px; }
-.ruta-asesor2-map-panel #mapCanvas { height: 370px; margin: 0; max-width: none; background: #edf2f3; }
-.ruta-asesor2-map-empty { display: grid; place-items: center; height: 100%; padding: 24px; color: var(--r2-muted); text-align: center; background: linear-gradient(135deg, #f6f8f8, #e7edee); }
-.ruta-asesor2-map-empty i { display: block; margin-bottom: 10px; color: var(--r2-amber); font-size: 30px; }
-.ruta-asesor2-map-empty strong { display: block; color: var(--r2-ink); font-size: 16px; }
-.ruta-asesor2-map-empty span { display: block; margin-top: 5px; font-size: 13px; }
-.ruta-asesor2-history-panel { padding-bottom: 6px; }
-.ruta-asesor2-history-panel #tabla-gestiones-asesor2 { overflow-x: auto; margin: 0; padding: 0 24px 18px; }
-.ruta-asesor2-table { width: 100%; min-width: 750px; margin: 0; border-collapse: separate; border-spacing: 0 10px; }
-.ruta-asesor2-table th { padding: 10px 12px; color: var(--r2-muted); font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-.ruta-asesor2-table td { padding: 14px 12px; border-top: 1px solid #eef0f2; border-bottom: 1px solid #eef0f2; background: #fff; color: var(--r2-ink); font-size: 13px; vertical-align: middle; }
-.ruta-asesor2-table td:first-child { border-left: 1px solid #eef0f2; border-radius: 10px 0 0 10px; }
-.ruta-asesor2-table td:last-child { border-right: 1px solid #eef0f2; border-radius: 0 10px 10px 0; text-align: right; }
-.ruta-asesor2-account { display: block; font-weight: 700; }
-.ruta-asesor2-time { color: var(--r2-muted); font-size: 12px; }
-.ruta-asesor2-effect { display: inline-block; max-width: 240px; color: #9b161a; font-size: 12px; font-weight: 700; }
-.ruta-asesor2-motive { color: var(--r2-muted); font-size: 12px; }
-.ruta-asesor2-gps { display: inline-flex; align-items: center; gap: 5px; padding: 5px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-.ruta-asesor2-gps.valid { color: var(--r2-green); background: #e4f6ec; }.ruta-asesor2-gps.invalid { color: var(--r2-amber); background: #fff3dc; }
-.btn-ruta-asesor2-detalle { border: 0; border-radius: 8px; padding: 9px 12px; color: #fff; background: var(--r2-red); font-size: 12px; font-weight: 700; }.btn-ruta-asesor2-detalle:hover { background: var(--r2-red-dark); }
-.ruta-asesor2-loading, .ruta-asesor2-empty { padding: 36px 20px; color: var(--r2-muted); text-align: center; }.ruta-asesor2-loading i, .ruta-asesor2-empty i { display: block; margin-bottom: 9px; color: var(--r2-red); font-size: 24px; }
-.ruta-asesor2-modal .modal-content { overflow: hidden; border: 0; border-radius: 16px; }.ruta-asesor2-modal .modal-header { border: 0; color: #fff; background: linear-gradient(120deg, var(--r2-red-dark), var(--r2-red)); }.ruta-asesor2-modal .close { color: #fff; opacity: .9; }.ruta-asesor2-modal .modal-body { padding: 24px; background: #f7f8f9; }
-.ruta-asesor2-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }.ruta-asesor2-detail-item { padding: 12px; border: 1px solid var(--r2-line); border-radius: 9px; background: #fff; }.ruta-asesor2-detail-item.full { grid-column: 1 / -1; }.ruta-asesor2-detail-item span { display: block; margin-bottom: 4px; color: var(--r2-muted); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }.ruta-asesor2-detail-item strong { font-size: 13px; font-weight: 600; }
-.ruta-asesor2-evidence { margin-top: 18px; padding: 16px; border-radius: 12px; background: #fff; border: 1px solid var(--r2-line); }.ruta-asesor2-evidence h3 { margin: 0 0 12px; font-size: 15px; }.ruta-asesor2-evidence .carousel { background: #181b20; border-radius: 10px; overflow: hidden; }.ruta-asesor2-evidence img { width: 100%; height: min(56vh, 440px); object-fit: contain; }.ruta-asesor2-evidence .carousel-control-next, .ruta-asesor2-evidence .carousel-control-prev { top: calc(50% - 20px) !important; }.ruta-asesor2-no-evidence { margin: 18px 0 0; padding: 14px; color: var(--r2-muted); text-align: center; border: 1px dashed #cfd4d9; border-radius: 10px; background: #fff; }
-@media (max-width: 720px) { .ruta-asesor2-shell { width: min(100% - 20px, 1180px); padding-top: 12px; }.ruta-asesor2-hero { display: block; padding: 27px 23px; border-radius: 14px; }.ruta-asesor2-back { display: inline-block; margin-top: 18px; }.ruta-asesor2-toolbar { display: block; padding: 18px; }.ruta-asesor2-toolbar p { margin: 15px 0 0; }.ruta-asesor2-summary { grid-template-columns: 1fr; }.ruta-asesor2-map-panel #mapCanvas { height: 300px; }.ruta-asesor2-panel-heading { padding: 18px; }.ruta-asesor2-history-panel #tabla-gestiones-asesor2 { padding: 0 12px 12px; }.ruta-asesor2-detail-grid { grid-template-columns: 1fr; }.ruta-asesor2-detail-item.full { grid-column: auto; } }
+.ruta-asesor2-page {
+  background: var(--r2-bg);
+  color: var(--r2-ink);
+  min-height: 100vh;
+  font-family: "Montserrat", Arial, sans-serif;
+}
+.ruta-asesor2-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 48px;
+}
+.ruta-asesor2-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 34px 38px;
+  color: #fff;
+  border-radius: 20px;
+  background: linear-gradient(120deg, var(--r2-red-dark), var(--r2-red));
+  box-shadow: 0 18px 36px rgba(159, 16, 23, 0.2);
+}
+.ruta-asesor2-eyebrow {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  opacity: 0.82;
+}
+.ruta-asesor2-hero h1 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(26px, 3vw, 38px);
+  font-weight: 700;
+}
+.ruta-asesor2-hero p {
+  max-width: 620px;
+  margin: 9px 0 0;
+  font-size: 15px;
+  opacity: 0.9;
+}
+.ruta-asesor2-back {
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 10px;
+  padding: 11px 15px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.ruta-asesor2-back:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  text-decoration: none;
+}
+.ruta-asesor2-toolbar,
+.ruta-asesor2-panel {
+  margin-top: 22px;
+  border: 1px solid var(--r2-line);
+  border-radius: 16px;
+  background: var(--r2-surface);
+  box-shadow: 0 7px 24px rgba(27, 37, 47, 0.05);
+}
+.ruta-asesor2-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 24px;
+}
+.ruta-asesor2-toolbar > div {
+  width: min(310px, 100%);
+}
+.ruta-asesor2-field-label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--r2-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.ruta-asesor2-toolbar input {
+  height: 44px;
+  border: 1px solid #d6dbe0;
+  border-radius: 9px;
+  font-weight: 700;
+}
+.ruta-asesor2-toolbar p {
+  margin: 0 0 11px;
+  color: var(--r2-muted);
+  font-size: 13px;
+}
+.ruta-asesor2-toolbar p i {
+  color: var(--r2-red);
+}
+.ruta-asesor2-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 22px;
+}
+.ruta-asesor2-stat {
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: var(--r2-surface);
+  border: 1px solid var(--r2-line);
+}
+.ruta-asesor2-stat strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 26px;
+  line-height: 1;
+}
+.ruta-asesor2-stat span {
+  color: var(--r2-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ruta-asesor2-stat i {
+  float: right;
+  color: var(--r2-red);
+  font-size: 20px;
+}
+.ruta-asesor2-panel {
+  overflow: hidden;
+}
+.ruta-asesor2-panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--r2-line);
+}
+.ruta-asesor2-panel-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ruta-asesor2-panel-icon {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 39px;
+  border-radius: 11px;
+  color: var(--r2-red);
+  background: #fff0f0;
+}
+.ruta-asesor2-panel h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.ruta-asesor2-panel p {
+  margin: 3px 0 0;
+  color: var(--r2-muted);
+  font-size: 12px;
+}
+.ruta-asesor2-map-panel #mapCanvas {
+  height: 370px;
+  margin: 0;
+  max-width: none;
+  background: #edf2f3;
+}
+.ruta-asesor2-map-empty {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: 24px;
+  color: var(--r2-muted);
+  text-align: center;
+  background: linear-gradient(135deg, #f6f8f8, #e7edee);
+}
+.ruta-asesor2-map-empty i {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--r2-amber);
+  font-size: 30px;
+}
+.ruta-asesor2-map-empty strong {
+  display: block;
+  color: var(--r2-ink);
+  font-size: 16px;
+}
+.ruta-asesor2-map-empty span {
+  display: block;
+  margin-top: 5px;
+  font-size: 13px;
+}
+.ruta-asesor2-history-panel {
+  padding-bottom: 6px;
+}
+.ruta-asesor2-history-panel #tabla-gestiones-asesor2 {
+  overflow-x: auto;
+  margin: 0;
+  padding: 0 24px 18px;
+}
+.ruta-asesor2-table {
+  width: 100%;
+  min-width: 750px;
+  margin: 0;
+  border-collapse: separate;
+  border-spacing: 0 10px;
+}
+.ruta-asesor2-table th {
+  padding: 10px 12px;
+  color: var(--r2-muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.ruta-asesor2-table td {
+  padding: 14px 12px;
+  border-top: 1px solid #eef0f2;
+  border-bottom: 1px solid #eef0f2;
+  background: #fff;
+  color: var(--r2-ink);
+  font-size: 13px;
+  vertical-align: middle;
+}
+.ruta-asesor2-table td:first-child {
+  border-left: 1px solid #eef0f2;
+  border-radius: 10px 0 0 10px;
+}
+.ruta-asesor2-table td:last-child {
+  border-right: 1px solid #eef0f2;
+  border-radius: 0 10px 10px 0;
+  text-align: right;
+}
+.ruta-asesor2-account {
+  display: block;
+  font-weight: 700;
+}
+.ruta-asesor2-time {
+  color: var(--r2-muted);
+  font-size: 12px;
+}
+.ruta-asesor2-effect {
+  display: inline-block;
+  max-width: 240px;
+  color: #9b161a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.ruta-asesor2-motive {
+  color: var(--r2-muted);
+  font-size: 12px;
+}
+.ruta-asesor2-gps {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ruta-asesor2-gps.valid {
+  color: var(--r2-green);
+  background: #e4f6ec;
+}
+.ruta-asesor2-gps.invalid {
+  color: var(--r2-amber);
+  background: #fff3dc;
+}
+.btn-ruta-asesor2-detalle {
+  border: 0;
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: #fff;
+  background: var(--r2-red);
+  font-size: 12px;
+  font-weight: 700;
+}
+.btn-ruta-asesor2-detalle:hover {
+  background: var(--r2-red-dark);
+}
+.ruta-asesor2-loading,
+.ruta-asesor2-empty {
+  padding: 36px 20px;
+  color: var(--r2-muted);
+  text-align: center;
+}
+.ruta-asesor2-loading i,
+.ruta-asesor2-empty i {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--r2-red);
+  font-size: 24px;
+}
+.ruta-asesor2-modal .modal-content {
+  overflow: hidden;
+  border: 0;
+  border-radius: 16px;
+}
+.ruta-asesor2-modal .modal-header {
+  border: 0;
+  color: #fff;
+  background: linear-gradient(120deg, var(--r2-red-dark), var(--r2-red));
+}
+.ruta-asesor2-modal .close {
+  color: #fff;
+  opacity: 0.9;
+}
+.ruta-asesor2-modal .modal-body {
+  padding: 24px;
+  background: #f7f8f9;
+}
+.ruta-asesor2-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.ruta-asesor2-detail-item {
+  padding: 12px;
+  border: 1px solid var(--r2-line);
+  border-radius: 9px;
+  background: #fff;
+}
+.ruta-asesor2-detail-item.full {
+  grid-column: 1 / -1;
+}
+.ruta-asesor2-detail-item span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--r2-muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.ruta-asesor2-detail-item strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+.ruta-asesor2-evidence {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--r2-line);
+}
+.ruta-asesor2-evidence h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+.ruta-asesor2-evidence .carousel {
+  background: #181b20;
+  border-radius: 10px;
+  overflow: hidden;
+}
+.ruta-asesor2-evidence img {
+  width: 100%;
+  height: min(56vh, 440px);
+  object-fit: contain;
+}
+.ruta-asesor2-evidence .carousel-control-next,
+.ruta-asesor2-evidence .carousel-control-prev {
+  top: calc(50% - 20px) !important;
+}
+.ruta-asesor2-no-evidence {
+  margin: 18px 0 0;
+  padding: 14px;
+  color: var(--r2-muted);
+  text-align: center;
+  border: 1px dashed #cfd4d9;
+  border-radius: 10px;
+  background: #fff;
+}
+@media (max-width: 720px) {
+  .ruta-asesor2-shell {
+    width: min(100% - 20px, 1180px);
+    padding-top: 12px;
+  }
+  .ruta-asesor2-hero {
+    display: block;
+    padding: 27px 23px;
+    border-radius: 14px;
+  }
+  .ruta-asesor2-back {
+    display: inline-block;
+    margin-top: 18px;
+  }
+  .ruta-asesor2-toolbar {
+    display: block;
+    padding: 18px;
+  }
+  .ruta-asesor2-toolbar p {
+    margin: 15px 0 0;
+  }
+  .ruta-asesor2-summary {
+    grid-template-columns: 1fr;
+  }
+  .ruta-asesor2-map-panel #mapCanvas {
+    height: 300px;
+  }
+  .ruta-asesor2-panel-heading {
+    padding: 18px;
+  }
+  .ruta-asesor2-history-panel #tabla-gestiones-asesor2 {
+    padding: 0 12px 12px;
+  }
+  .ruta-asesor2-detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .ruta-asesor2-detail-item.full {
+    grid-column: auto;
+  }
+}
